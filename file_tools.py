@@ -5,6 +5,7 @@ Usage::
     python file_tools.py              # desktop mode (default)
     python file_tools.py --web        # web-only mode
     python file_tools.py --mode web   # same as above
+    python file_tools.py installer    # build Windows NSIS installer
 """
 
 from __future__ import annotations
@@ -30,8 +31,24 @@ def run(mode: str = "desktop") -> None:
         sys.exit(1)
 
 
+def create_installer() -> None:
+    """Build a Windows NSIS installer (portable venv + source)."""
+    from pathlib import Path
+
+    from file_tools.tools.installer_builder import InstallerBuilder
+
+    project_root = Path(__file__).resolve().parent
+    builder = InstallerBuilder(project_root)
+    print("Building installer …")
+    installer = builder.build()
+    print(f"Installer created: {installer}")
+
+
 def _cli() -> None:
     parser = argparse.ArgumentParser(description="FileTools launcher")
+    sub = parser.add_subparsers(dest="command")
+
+    # Default run mode (no subcommand)
     parser.add_argument(
         "--mode",
         choices=["desktop", "web"],
@@ -45,8 +62,16 @@ def _cli() -> None:
         dest="mode",
         help="Shorthand for --mode web.",
     )
+
+    # installer subcommand
+    sub.add_parser("installer", help="Build a Windows NSIS installer.")
+
     args = parser.parse_args()
-    run(args.mode)
+
+    if args.command == "installer":
+        create_installer()
+    else:
+        run(args.mode)
 
 
 if __name__ == "__main__":

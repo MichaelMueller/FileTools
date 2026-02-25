@@ -1,5 +1,15 @@
 # Agent Log
 
+## 2026-02-25 12:11 – Add `create_installer` command (NSIS)
+
+- **New module**: `file_tools/tools/installer_builder.py` — `InstallerBuilder` class that bundles the app into a Windows NSIS installer using a portable venv + source code (no PyInstaller).
+- **Build pipeline**: `_clean()` → `_create_staging()` → `_create_venv()` (with `--copies` for portability) → `_install_deps()` (pip install into venv) → `_copy_source()` (package + entry-point + icon) → `_write_launcher()` (`.bat` wrapper) → `_write_nsis_script()` (MUI2, LZMA, user-level install, shortcuts, uninstaller, Add/Remove Programs registry) → `_compile_nsis()`.
+- **CLI integration**: Added `installer` subcommand to `file_tools.py` — `python file_tools.py installer`.
+- **NSIS auto-detection**: Checks PATH, well-known install paths, and `NSIS_HOME` env var.
+- **Output**: `build/installer/output/FileTools-0.1.0-Setup.exe` (~19 MB).
+- **Tests**: 18 unit tests in `file_tools/tests/test_installer_builder.py` covering all steps, NSIS detection, error paths, and full pipeline (mocked). All 90 tests pass.
+- **NSIS**: Installed via `winget install NSIS.NSIS` at `C:\Program Files (x86)\NSIS\makensis.exe`.
+
 ## 2026-02-25 12:15 – Dedup: clean scan output & inline delete feedback
 
 - **Scan output**: No text shown under the Scan button when duplicates are found — groups are rendered directly below. Only "No duplicates found." (green) appears when the directory is clean.
