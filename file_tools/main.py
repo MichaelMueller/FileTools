@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from file_tools.tools.dir_compare import compare_directories, sync_directories
+from file_tools.tools.dedup_scanner import DedupScanner
 from file_tools.tools.pdf_tools import (
     merge_pdfs,
     parse_page_ranges,
@@ -91,34 +92,38 @@ async def pdf_split(
     If *ranges* is empty every page becomes its own file.
     *output_type* can be ``pdf`` or ``jpeg``.
     """
-    import tempfile
+    pdf_bytes = await file.read()
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
+    from pypdf import PdfReader as _Reader  # noqa: PLC0415
 
-    try:
-        from pypdf import PdfReader as _Reader  # noqa: PLC0415
-
-        total_pages = len(_Reader(str(tmp_path)).pages)
-        if ranges.strip():
+    total_pages = len(_Reader(io.BytesIO(pdf_bytes)).pages)
+    if ranges.strip():
+        try:
             page_ranges = parse_page_ranges(ranges, total_pages)
-        else:
-            page_ranges = [(i, i) for i in range(1, total_pages + 1)]
+        except (ValueError, TypeError) as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=422)
+    else:
+        page_ranges = [(i, i) for i in range(1, total_pages + 1)]
 
-        ext = "jpg" if output_type == "jpeg" else "pdf"
-        stem = Path(file.filename or "file").stem
+    ext = "jpg" if output_type == "jpeg" else "pdf"
+    stem = Path(file.filename or "file").stem
 
-        if output_type == "jpeg":
+    if output_type == "jpeg":
+        # pypdfium2 needs a real file – write temp, split, then clean up
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(pdf_bytes)
+            tmp_path = Path(tmp.name)
+        try:
             parts = split_pdf_to_images(tmp_path, page_ranges)
-        else:
-            parts = split_pdf(tmp_path, page_ranges)
-    except (ValueError, ImportError) as exc:
-        tmp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    finally:
-        tmp_path.unlink(missing_ok=True)
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    else:
+        parts = split_pdf(io.BytesIO(pdf_bytes), page_ranges)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -249,6 +254,42 @@ async def dir_sync(
 
 
 # ---------------------------------------------------------------------------
+# Deduplication
+# ---------------------------------------------------------------------------
+
+_dedup_db_url: str | None = None  # let DedupScanner use its default (temp dir)
+
+
+@app.post("/api/dedup/scan")
+async def dedup_scan(body: dict) -> JSONResponse:
+    """Scan a directory for duplicate files and folders."""
+    directory = body.get("directory", "")
+    root = Path(directory)
+    if not root.is_dir():
+        raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
+
+    scanner = DedupScanner(db_url=_dedup_db_url)
+    result = scanner.scan(root)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/dedup/delete")
+async def dedup_delete(body: dict) -> JSONResponse:
+    """Delete a file or directory (used by dedup UI)."""
+    path_str = body.get("path", "")
+    is_dir: bool = body.get("is_dir", False)
+    target = Path(path_str)
+
+    if is_dir and not target.is_dir():
+        raise HTTPException(status_code=404, detail=f"Directory not found: {path_str}")
+    if not is_dir and not target.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path_str}")
+
+    DedupScanner.delete_path(target)
+    return JSONResponse(content={"deleted": path_str})
+
+
+# ---------------------------------------------------------------------------
 # Desktop mode check
 # ---------------------------------------------------------------------------
 
@@ -315,15 +356,15 @@ async def file_save(
 
 @app.post("/api/file/open")
 async def file_open(body: dict) -> JSONResponse:
-    """Open a file with the system default application."""
+    """Open a file or folder with the system default application."""
     import os
     import subprocess
     import sys
 
     path = body.get("path", "")
     fpath = Path(path)
-    if not fpath.is_file():
-        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    if not fpath.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {path}")
 
     if sys.platform == "win32":
         os.startfile(str(fpath))  # noqa: S606
@@ -335,14 +376,42 @@ async def file_open(body: dict) -> JSONResponse:
     return JSONResponse(content={"opened": str(fpath)})
 
 
+@app.post("/api/pdf/upload-temp")
+async def pdf_upload_temp(
+    file: Annotated[UploadFile, File()],
+) -> JSONResponse:
+    """Save an uploaded PDF to a temporary file and return its path.
+
+    Used in desktop mode when the user selected a file via the browser
+    input instead of the native file dialog – the server needs a real
+    path for the split-to-folder workflow.
+    """
+    import tempfile as _tf  # noqa: PLC0415
+
+    data = await file.read()
+    suffix = Path(file.filename or "upload.pdf").suffix or ".pdf"
+    stem = Path(file.filename or "upload").stem
+    with _tf.NamedTemporaryFile(delete=False, suffix=suffix, prefix=f"{stem}_") as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    return JSONResponse(content={"path": tmp_path})
+
+
 @app.get("/api/dialog/directory")
-async def dialog_directory() -> JSONResponse:
-    """Open a native folder-select dialog (desktop / pywebview mode only)."""
+async def dialog_directory(default_dir: str = "") -> JSONResponse:
+    """Open a native folder-select dialog (desktop / pywebview mode only).
+
+    *default_dir* sets the initial directory shown by the dialog.
+    """
     if _webview_window is None:
         raise HTTPException(status_code=503, detail="Not running in desktop mode.")
     import webview as _wv  # noqa: PLC0415
 
-    result = _webview_window.create_file_dialog(_wv.FOLDER_DIALOG)
+    kwargs: dict = {}
+    if default_dir and Path(default_dir).is_dir():
+        kwargs["directory"] = default_dir
+
+    result = _webview_window.create_file_dialog(_wv.FOLDER_DIALOG, **kwargs)
     directory = result[0] if result else None
     return JSONResponse(content={"directory": directory})
 

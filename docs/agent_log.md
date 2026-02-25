@@ -1,5 +1,57 @@
 # Agent Log
 
+## 2026-02-25 12:15 – Dedup: clean scan output & inline delete feedback
+
+- **Scan output**: No text shown under the Scan button when duplicates are found — groups are rendered directly below. Only "No duplicates found." (green) appears when the directory is clean.
+- **Delete feedback**: Success/error now shown inline on the affected row instead of a global result box. On success the row fades out (strike-through + opacity) then removes after 600ms. On error the row highlights red with an error message appended.
+
+## 2026-02-25 12:05 – Dedup: simplify scan output & fix deletion
+
+- **Scan result**: Removed verbose stats text. Now shows just "No duplicates found." (green) or "X duplicate dir group(s), Y duplicate file group(s)" (red).
+- **Deletion fix**: Delete buttons were built via `innerHTML` with inline `onclick` using `escHtml()` + string replacement, which mangled Windows backslash paths (e.g. `C:\Users` → invalid JS escape `\U`). Replaced with `document.createElement` + `addEventListener` closure, so the raw path string is preserved correctly. Deletion now works.
+
+## 2026-02-25 11:50 – Fix taskbar icon (AppUserModelID)
+
+- **Problem**: Window title-bar icon was correct but the Windows taskbar still showed the Python icon because the process inherited Python's AppUserModelID.
+- **Fix**: Call `ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DrMichaelMueller.FileTools")` at the start of `run_desktop()`, before the window is created. Windows now treats the process as a distinct app and shows the custom `icon.ico` in the taskbar.
+
+## 2026-02-25 11:41 – Fix desktop detection race condition (split dir chooser, dedup browse)
+
+- **Root cause**: `_detectDesktop()` was called during page init before `set_webview_window()` fired (on pywebview `loaded` event). The `/api/mode` endpoint returned `{desktop: false}` and the result was cached permanently, making the app think it was in web mode for the entire session.
+- **Fix**: `_detectDesktop()` now only caches a `true` result. If `false`, it re-checks on each call, so once the webview window registers, subsequent calls correctly return `true`.
+- **Split "Open folder after creation"**: The checkbox visibility init now retries up to 20 times (300ms apart) until desktop mode is detected, ensuring it appears reliably.
+- **Dedup Browse**: Now correctly opens the native pywebview folder dialog in desktop mode (same root cause fix).
+- **Cache clearance**: Cleared `%APPDATA%\pywebview` WebView2 user data to ensure a fresh start.
+
+## 2026-02-25 12:00 – UI fixes: split browse, dir compare sync, dedup browse
+
+- **PDF Split – Desktop browse**: The Browse button now uses the native file dialog (`openFileDialog('split')`) in desktop mode instead of always triggering the hidden `<input type="file">`. In web mode it falls back to the browser file picker as before.
+- **PDF Split – "Open folder after creation"**: Already existed from prior session – confirmed working. Checkbox shown only in desktop mode.
+- **Dir Compare – Hide "Copy Selected" when no diff**: Wrapped the sync action row (divider, Copy Selected button, result) in a `#sync-actions` container. When all files are identical, the container is hidden; when there are diffs, it's shown.
+- **Dedup – Browse button fix**: In desktop mode, the Browse button now correctly opens the native folder dialog. In web mode, it falls back to a `webkitdirectory` file input so the user can pick a folder via the browser. Previously it silently did nothing in web mode.
+- **Dedup – Memoize last dir**: Already had localStorage persistence from prior session – verified both the browse dialog and manual input save to localStorage and restore on page load.
+
+## 2026-02-25 11:22 – Dedup tool, sticky nav, footer & modals, port iterator, icon fix
+
+- **Dedup file tool tab**: New tab for finding duplicate files and directories. Parses a chosen directory, computes `xxhash3_128` hashes for every file and directory (dir hash = hash of sorted child hashes). Results cached in a temporary SQLAlchemy/SQLite database (`%TEMP%/filetools_dedup.db`) so re-scans are fast. Duplicates shown grouped (directories first, then files) with delete buttons and a confirmation step. Desktop/web mode aware (native dir dialog vs text input).
+- **New module `file_tools/tools/dedup_scanner.py`**: `DedupScanner` class with `FileHash` SQLAlchemy model, bottom-up hashing, cache invalidation by mtime+size, nested-dir filtering, and file-in-dup-dir filtering. `delete_path()` static method for safe deletion.
+- **New API endpoints**: `/api/dedup/scan` (POST, scans directory) and `/api/dedup/delete` (POST, deletes a path with confirmation).
+- **Port iterator**: `_find_port()` tries up to 5 consecutive ports starting from the default. Raises `RuntimeError` with a clear message if all are occupied.
+- **Sticky navigation**: Tab bar now uses `position: sticky; top: 56px; z-index: 99`.
+- **Footer update**: Shows "© Dr. Michael Müller" with GitHub link, Imprint and Data Privacy modal links.
+- **Imprint & Data Privacy modals**: Full legal pages (§5 TMG imprint, GDPR-style privacy policy) in overlay modals.
+- **Icon fix (attempt 2)**: Switched from `BrowserView.instances` approach to `window.events.shown` callback + `window.native` attribute to set the WinForms icon reliably.
+- **PDF split fix**: `parse_page_ranges` ValueError now caught and returned as 422 instead of 500.
+- **Tests**: 13 new dedup scanner tests, updated desktop tests for port iterator and events API, added dedup API tests. Full suite: 72 passed.
+- **Dependency**: Added `sqlalchemy>=2.0.0` to `pyproject.toml`.
+
+## 2026-02-25 – PDF Split: fix desktop directory chooser & add "open folder" checkbox
+
+- **Desktop split fix**: `splitPdf()` no longer requires `_splitDesktopFile` to be set for the desktop path. In desktop mode, if the user selected the file via the browser `<input type="file">` instead of the native dialog, the file is first uploaded to a temp location via the new `/api/pdf/upload-temp` endpoint, then the split-to-folder workflow proceeds normally with a native directory chooser.
+- **New endpoint `/api/pdf/upload-temp`**: Saves an uploaded file to a temp location and returns its server-side path. Used as a bridge when browser-selected files need a real path for split-to-folder.
+- **"Open folder after creation" checkbox**: Added a toggle (checked by default, desktop-only) that opens the output folder in Explorer after a successful split. Works for both the initial split and the overwrite-confirm flow.
+- **`/api/file/open` now supports directories**: Changed the existence check from `is_file()` to `exists()` so that `os.startfile` can also open folders in Explorer.
+
 ## 2026-02-25 – Dir Compare & icon fixes
 
 - **Dir Compare – localStorage**: Already had `private_mode=False`, localStorage was working but the result box was hidden by an inline `display:none` style that `showResult()` never removed. Fixed `showResult()` to call `removeAttribute('style')`.

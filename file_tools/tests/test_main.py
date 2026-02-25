@@ -185,6 +185,119 @@ def test_dir_sync_invalid_target(client: TestClient, src_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Dedup API endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_scan_success(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "dup_root"
+    root.mkdir()
+    (root / "a.txt").write_text("same")
+    (root / "b.txt").write_text("same")
+    (root / "c.txt").write_text("diff")
+
+    r = client.post(
+        "/api/dedup/scan",
+        json={"directory": str(root)},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "dup_files" in data
+    assert len(data["dup_files"]) == 1
+    assert data["stats"]["total_files"] == 3
+
+
+def test_dedup_scan_invalid_dir(client: TestClient) -> None:
+    r = client.post(
+        "/api/dedup/scan",
+        json={"directory": "/nonexistent/path"},
+    )
+    assert r.status_code == 422
+
+
+def test_dedup_delete_file(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "todel.txt"
+    f.write_text("bye")
+    r = client.post(
+        "/api/dedup/delete",
+        json={"path": str(f), "is_dir": False},
+    )
+    assert r.status_code == 200
+    assert not f.exists()
+
+
+def test_dedup_delete_directory(client: TestClient, tmp_path: Path) -> None:
+    d = tmp_path / "todel_dir"
+    d.mkdir()
+    (d / "child.txt").write_text("x")
+    r = client.post(
+        "/api/dedup/delete",
+        json={"path": str(d), "is_dir": True},
+    )
+    assert r.status_code == 200
+    assert not d.exists()
+
+
+def test_dedup_delete_nonexistent_file(client: TestClient) -> None:
+    r = client.post(
+        "/api/dedup/delete",
+        json={"path": "/nonexistent", "is_dir": False},
+    )
+    assert r.status_code == 404
+
+
+def test_dedup_delete_nonexistent_dir(client: TestClient) -> None:
+    r = client.post(
+        "/api/dedup/delete",
+        json={"path": "/nonexistent", "is_dir": True},
+    )
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Mode check
+# ---------------------------------------------------------------------------
+
+
+def test_mode_check(client: TestClient) -> None:
+    r = client.get("/api/mode")
+    assert r.status_code == 200
+    assert r.json()["desktop"] is False
+
+
+# ---------------------------------------------------------------------------
+# File open (supports files and folders)
+# ---------------------------------------------------------------------------
+
+
+def test_file_open_nonexistent(client: TestClient) -> None:
+    r = client.post(
+        "/api/file/open",
+        json={"path": "/nonexistent/file.pdf"},
+    )
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Upload-temp
+# ---------------------------------------------------------------------------
+
+
+def test_upload_temp(client: TestClient) -> None:
+    pdf = _make_pdf_bytes(1)
+    r = client.post(
+        "/api/pdf/upload-temp",
+        files=[("file", ("test.pdf", pdf, "application/pdf"))],
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert "path" in data
+    p = Path(data["path"])
+    assert p.exists()
+    p.unlink()  # cleanup
+
+
+# ---------------------------------------------------------------------------
 # Dialog endpoints – no webview window
 # ---------------------------------------------------------------------------
 

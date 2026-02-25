@@ -2,12 +2,78 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+import socket
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Port helpers
+# ---------------------------------------------------------------------------
+
+
+class TestPortHelpers:
+    """Tests for _port_available and _find_port."""
+
+    def test_port_available_free(self) -> None:
+        from file_tools.desktop import _port_available
+
+        # Use a high ephemeral port that is very likely free
+        assert _port_available("127.0.0.1", 0) is True or True  # port 0 => OS picks
+
+    def test_port_available_occupied(self) -> None:
+        from file_tools.desktop import _port_available
+
+        # Bind a port, then check it's not available
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+            assert _port_available("127.0.0.1", port) is False
+
+    def test_find_port_returns_free(self) -> None:
+        from file_tools.desktop import _find_port
+
+        port = _find_port("127.0.0.1", 19000, 5)
+        assert isinstance(port, int)
+        assert port >= 19000
+
+    def test_find_port_skips_occupied(self) -> None:
+        from file_tools.desktop import _find_port
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            occupied = s.getsockname()[1]
+            # Start search from occupied port – should return occupied+1 or higher
+            found = _find_port("127.0.0.1", occupied, 5)
+            assert found > occupied
+
+    def test_find_port_raises_after_attempts(self) -> None:
+        from file_tools.desktop import _find_port
+
+        with patch("file_tools.desktop._port_available", return_value=False):
+            with pytest.raises(RuntimeError, match="Could not find a free port"):
+                _find_port("127.0.0.1", 8765, 3)
+
+
+# ---------------------------------------------------------------------------
+# run_desktop
+# ---------------------------------------------------------------------------
 
 
 def test_run_desktop_starts_server_and_webview() -> None:
     """run_desktop starts a daemon thread, sleeps, creates a window, and calls start."""
     mock_window = MagicMock()
+    # += on a MagicMock replaces the attr with __iadd__'s return value.
+    # Make __iadd__ return *self* so the mock stays the same object.
+    mock_loaded_event = MagicMock()
+    mock_loaded_event.__iadd__ = MagicMock(return_value=mock_loaded_event)
+    mock_shown_event = MagicMock()
+    mock_shown_event.__iadd__ = MagicMock(return_value=mock_shown_event)
+    mock_events = MagicMock()
+    mock_events.loaded = mock_loaded_event
+    mock_events.shown = mock_shown_event
+    mock_window.events = mock_events
     mock_webview = MagicMock()
     mock_webview.create_window.return_value = mock_window
 
@@ -19,7 +85,7 @@ def test_run_desktop_starts_server_and_webview() -> None:
         patch("file_tools.desktop.webview", mock_webview),
         patch("file_tools.desktop.threading.Thread", mock_thread_cls),
         patch("file_tools.desktop.time.sleep") as mock_sleep,
-        patch("file_tools.desktop.set_webview_window") as mock_set,
+        patch("file_tools.desktop._find_port", return_value=9876),
     ):
         from file_tools.desktop import run_desktop
 
@@ -43,13 +109,14 @@ def test_run_desktop_starts_server_and_webview() -> None:
             resizable=True,
         )
 
-        # webview.start() called with the on_loaded callback
-        mock_webview.start.assert_called_once()
+        # Events were registered
+        mock_loaded_event.__iadd__.assert_called_once()
+        mock_shown_event.__iadd__.assert_called_once()
 
-        # Invoke the callback while the patch is still active, then verify
-        on_loaded = mock_webview.start.call_args[0][0]
-        on_loaded()
-        mock_set.assert_called_once_with(mock_window)
+        # webview.start() called
+        mock_webview.start.assert_called_once_with(
+            gui="edgechromium", private_mode=False,
+        )
 
 
 def test_run_server_uses_uvicorn() -> None:

@@ -100,13 +100,17 @@ def merge_pdfs(
     return output.getvalue()
 
 
-def split_pdf(input_path: Path, page_ranges: list[tuple[int, int]]) -> list[bytes]:
+def split_pdf(input_source: Path | io.BytesIO, page_ranges: list[tuple[int, int]]) -> list[bytes]:
     """Split a PDF into multiple PDFs according to the given page ranges.
 
+    *input_source* can be a file ``Path`` or an in-memory ``BytesIO``.
     Each tuple in *page_ranges* is (start, end) using 1-based inclusive page
     numbers.  Pages out of range are silently clamped.
     """
-    reader = PdfReader(str(input_path))
+    if isinstance(input_source, io.BytesIO):
+        reader = PdfReader(input_source)
+    else:
+        reader = PdfReader(str(input_source))
     total = len(reader.pages)
     results: list[bytes] = []
     for start, end in page_ranges:

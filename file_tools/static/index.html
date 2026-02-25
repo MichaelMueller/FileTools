@@ -80,6 +80,9 @@
     nav.tab-bar {
       background: var(--clr-surface);
       border-bottom: 1px solid var(--clr-outline);
+      position: sticky;
+      top: 56px;
+      z-index: 99;
     }
     .tab-bar__inner {
       display: flex;
@@ -404,6 +407,98 @@
       font-size: .75rem;
       color: var(--clr-muted);
     }
+    footer a { color: var(--clr-primary); }
+    .footer-sep { margin: 0 var(--sp-sm); opacity: .5; }
+
+    /* ── Modal ────────────────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.7);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--clr-surface);
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      padding: var(--sp-lg);
+      max-width: 700px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: var(--elevation-2);
+    }
+    .modal h2 {
+      font-size: 1.1rem;
+      margin-bottom: var(--sp-md);
+      color: #fff;
+      display: flex; align-items: center; gap: var(--sp-sm);
+    }
+    .modal h3 {
+      font-size: .95rem;
+      margin: var(--sp-md) 0 var(--sp-sm);
+      color: var(--clr-primary);
+    }
+    .modal p, .modal li {
+      font-size: .85rem;
+      color: var(--clr-on-surface);
+      line-height: 1.6;
+      margin-bottom: var(--sp-sm);
+    }
+    .modal ul { padding-left: var(--sp-lg); margin-bottom: var(--sp-md); }
+    .modal__close {
+      float: right;
+      background: none; border: none;
+      color: var(--clr-muted); cursor: pointer;
+      font-size: 1.2rem;
+    }
+    .modal__close:hover { color: #fff; }
+
+    /* ── Dedup-specific ───────────────────────────────────────────────── */
+    .dup-group {
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      background: var(--clr-surface2);
+      margin-bottom: var(--sp-md);
+      overflow: hidden;
+    }
+    .dup-group__header {
+      padding: var(--sp-sm) var(--sp-md);
+      font-size: .8rem;
+      font-weight: 500;
+      color: var(--clr-primary);
+      background: rgba(74,158,255,.06);
+      border-bottom: 1px solid var(--clr-outline);
+      display: flex; align-items: center; gap: var(--sp-sm);
+    }
+    .dup-group__header .material-icons { font-size: 16px; }
+    .dup-entry {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-sm);
+      padding: var(--sp-sm) var(--sp-md);
+      border-bottom: 1px solid var(--clr-outline);
+      font-size: .85rem;
+    }
+    .dup-entry:last-child { border-bottom: none; }
+    .dup-entry__path {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--clr-on-surface);
+    }
+    .dup-entry__size {
+      font-size: .75rem;
+      color: var(--clr-muted);
+      min-width: 70px;
+      text-align: right;
+    }
+    .dup-entry .btn { flex-shrink: 0; }
 
     /* ── Responsive ──────────────────────────────────────────────────── */
     @media (max-width: 700px) {
@@ -435,6 +530,9 @@
     </button>
     <button class="tab-btn" id="tab-dir-compare" onclick="switchTab('dir-compare', this)">
       <span class="material-icons" style="font-size:16px">compare_arrows</span>Dir Compare
+    </button>
+    <button class="tab-btn" id="tab-dedup" onclick="switchTab('dedup', this)">
+      <span class="material-icons" style="font-size:16px">file_copy</span>Dedup
     </button>
   </div>
 </nav>
@@ -534,7 +632,7 @@
           <div class="row">
             <input type="text" id="split-file-display" placeholder="No file selected" readonly />
             <input type="file" id="split-file" accept=".pdf" />
-            <button class="btn btn-outline" onclick="document.getElementById('split-file').click()" style="white-space:nowrap">
+            <button class="btn btn-outline" onclick="browseSplitFile()" style="white-space:nowrap">
               <span class="material-icons" style="font-size:16px">folder_open</span>Browse
             </button>
           </div>
@@ -563,6 +661,11 @@
             <option value="600">600 – High</option>
           </select>
         </div>
+      </div>
+
+      <div class="toggle-row" id="split-open-folder-row" style="display:none">
+        <input type="checkbox" id="split-open-folder" checked />
+        <label for="split-open-folder">Open folder after creation</label>
       </div>
 
       <div class="action-row">
@@ -639,23 +742,160 @@
         <button class="btn btn-outline btn-sm" onclick="selectAll(false)">Deselect All</button>
       </div>
       <div class="check-list" id="sync-file-list"></div>
-      <div class="divider"></div>
-      <div class="action-row" style="margin-top:0">
-        <button class="btn btn-secondary" onclick="syncDirectories()">
-          <span class="material-icons" style="font-size:16px">sync</span>Copy Selected
-        </button>
-        <div class="spinner" id="sync-spinner"></div>
+      <div id="sync-actions">
+        <div class="divider"></div>
+        <div class="action-row" style="margin-top:0">
+          <button class="btn btn-secondary" onclick="syncDirectories()">
+            <span class="material-icons" style="font-size:16px">sync</span>Copy Selected
+          </button>
+          <div class="spinner" id="sync-spinner"></div>
+        </div>
+        <div class="result-box" id="sync-result"></div>
       </div>
-      <div class="result-box" id="sync-result"></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── DEDUPLICATION ─────────────────────────── -->
+  <section class="tool-panel" id="dedup">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">file_copy</span> File Deduplication
+      </div>
+      <p class="card__desc">
+        Scan a directory for duplicate files and folders using xxHash3-128.
+        Results are cached in a temporary database so re-scanning is fast.
+        Directories with identical content are shown first, then individual files.
+      </p>
+
+      <div class="row">
+        <div class="form-group" style="flex:2">
+          <label for="dedup-dir">Directory to scan</label>
+          <div class="row">
+            <input type="text" id="dedup-dir" placeholder="/path/to/directory" />
+            <button class="btn btn-outline" onclick="openDedupDirDialog()" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">folder_open</span>Browse
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="scanDedup()">
+          <span class="material-icons" style="font-size:16px">search</span>Scan
+        </button>
+        <div class="spinner" id="dedup-spinner"></div>
+      </div>
+      <div class="result-box" id="dedup-result"></div>
+    </div>
+
+    <!-- Duplicate groups (populated by JS) -->
+    <div id="dedup-groups"></div>
+
+    <!-- Delete confirmation card (hidden by default) -->
+    <div class="card" id="dedup-confirm-card" style="display:none;border:1px solid var(--clr-warn);">
+      <div class="card__title" style="color:var(--clr-warn)">
+        <span class="material-icons">warning</span> Confirm Deletion
+      </div>
+      <p class="card__desc" id="dedup-confirm-path" style="word-break:break-all;"></p>
+      <div class="action-row" style="margin-top:var(--sp-sm)">
+        <button class="btn btn-primary" style="background:var(--clr-error)" id="dedup-confirm-btn" onclick="_dedupConfirmDelete()">
+          <span class="material-icons" style="font-size:16px">delete_forever</span>Delete
+        </button>
+        <button class="btn btn-outline" onclick="document.getElementById('dedup-confirm-card').style.display='none'">Cancel</button>
+      </div>
     </div>
   </section>
 
 </main>
 
+<!-- ═══════════════ IMPRINT MODAL ═══════════════════════════════════ -->
+<div class="modal-overlay" id="modal-imprint" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <button class="modal__close" onclick="document.getElementById('modal-imprint').classList.remove('open')">&times;</button>
+    <h2><span class="material-icons">gavel</span> Imprint (Impressum)</h2>
+    <h3>Information according to &sect; 5 TMG</h3>
+    <p>
+      Dr. Michael M&uuml;ller<br />
+      Private open-source project<br />
+      Contact: via <a href="https://github.com/muellermic" target="_blank" rel="noopener">GitHub</a>
+    </p>
+    <h3>Liability for Content</h3>
+    <p>
+      The contents of this application have been created with the utmost care.
+      However, no guarantee can be given for the accuracy, completeness, or
+      timeliness of the content. As a service provider, the author is responsible
+      for his own content in this application according to general laws.
+      The author is not obliged to monitor transmitted or stored third-party
+      information or to investigate circumstances that indicate illegal activity.
+    </p>
+    <h3>Liability for Links</h3>
+    <p>
+      This application may contain links to external websites of third parties
+      over whose content the author has no influence. Therefore, no guarantee can
+      be given for this external content. The respective provider or operator of
+      the linked pages is always responsible for their content.
+    </p>
+    <h3>Copyright</h3>
+    <p>
+      The source code of this project is published under an open-source license.
+      Please refer to the repository for the specific license terms.
+    </p>
+  </div>
+</div>
+
+<!-- ═══════════════ DATA PRIVACY MODAL ══════════════════════════════ -->
+<div class="modal-overlay" id="modal-privacy" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <button class="modal__close" onclick="document.getElementById('modal-privacy').classList.remove('open')">&times;</button>
+    <h2><span class="material-icons">security</span> Data Privacy Policy</h2>
+    <h3>1. Overview</h3>
+    <p>
+      FileTools is a local desktop/web application. All file processing happens
+      entirely on your machine. No data is transmitted to external servers.
+    </p>
+    <h3>2. Data Processing</h3>
+    <ul>
+      <li><strong>File content:</strong> Files are processed in-memory or via temporary files on your local system. No file data leaves your machine.</li>
+      <li><strong>Hash values:</strong> xxHash3-128 digests are computed locally for directory comparison and deduplication. These hashes are stored in a temporary local database to speed up subsequent scans.</li>
+      <li><strong>Local storage:</strong> The application uses your browser&rsquo;s <code>localStorage</code> to remember UI preferences (e.g. last-used directories). This data never leaves your device.</li>
+    </ul>
+    <h3>3. No Cookies or Tracking</h3>
+    <p>
+      This application does not use cookies, analytics, tracking pixels, or any
+      form of user tracking. There is no advertising.
+    </p>
+    <h3>4. Third-Party Services</h3>
+    <p>
+      The application loads the <em>Roboto</em> font and <em>Material Icons</em>
+      from Google Fonts. This causes your browser to make requests to Google
+      servers (<code>fonts.googleapis.com</code>, <code>fonts.gstatic.com</code>).
+      Google&rsquo;s privacy policy applies to these requests.
+      No other third-party services are used.
+    </p>
+    <h3>5. Your Rights</h3>
+    <p>
+      Since no personal data is collected or stored by this application beyond
+      what resides on your own machine, the typical data-subject rights
+      (access, rectification, deletion) are inherently fulfilled &mdash; you have
+      full control over all data at all times.
+    </p>
+    <h3>6. Contact</h3>
+    <p>
+      If you have questions about data privacy, please reach out via
+      <a href="https://github.com/muellermic" target="_blank" rel="noopener">GitHub</a>.
+    </p>
+  </div>
+</div>
+
 <!-- ═══════════════════════════ FOOTER ═══════════════════════════════ -->
 <footer>
-  FileTools &mdash; PDF merge &amp; split &bull; Directory compare &bull;
-  Built with FastAPI &amp; pywebview
+  &copy; Dr. Michael M&uuml;ller
+  <span class="footer-sep">&bull;</span>
+  <a href="https://github.com/muellermic" target="_blank" rel="noopener">GitHub</a>
+  <span class="footer-sep">&bull;</span>
+  <a href="#" onclick="event.preventDefault();document.getElementById('modal-imprint').classList.add('open')">Imprint</a>
+  <span class="footer-sep">&bull;</span>
+  <a href="#" onclick="event.preventDefault();document.getElementById('modal-privacy').classList.add('open')">Data Privacy</a>
 </footer>
 
 <!-- ═══════════════════════════ JAVASCRIPT ═══════════════════════════ -->
@@ -799,15 +1039,15 @@ function _mergeSettings() {
   };
 }
 
-let _isDesktop = null;               // cached after first probe
+let _isDesktop = null;               // cached after first positive probe
 async function _detectDesktop() {
-  if (_isDesktop !== null) return _isDesktop;
+  if (_isDesktop === true) return true;
   try {
     const r = await fetch('/api/mode');
     if (r.ok) { const d = await r.json(); _isDesktop = !!d.desktop; }
-    else { _isDesktop = false; }
-  } catch { _isDesktop = false; }
-  return _isDesktop;
+    else { _isDesktop = null; }
+  } catch { _isDesktop = null; }
+  return !!_isDesktop;
 }
 
 async function _desktopSave(blob, defaultName) {
@@ -900,6 +1140,17 @@ document.getElementById('split-output-type').addEventListener('change', function
   document.getElementById('split-dpi-group').style.display = this.value === 'jpeg' ? '' : 'none';
 });
 
+/* Show "open folder" checkbox in desktop mode (retry until webview window is registered) */
+(async function _showSplitDesktopOptions() {
+  for (let i = 0; i < 20; i++) {
+    if (await _detectDesktop()) {
+      document.getElementById('split-open-folder-row').style.display = '';
+      return;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+})();
+
 async function splitPdf() {
   const input      = document.getElementById('split-file');
   const ranges     = document.getElementById('split-ranges').value.trim();
@@ -909,13 +1160,38 @@ async function splitPdf() {
 
   document.getElementById('split-overwrite-card').style.display = 'none';
 
-  /* ── Desktop path: split directly to a folder ─────────────────── */
-  if (isDesktop && _splitDesktopFile) {
+  /* Show / hide the "open folder" toggle */
+  document.getElementById('split-open-folder-row').style.display = isDesktop ? '' : 'none';
+
+  /* ── Desktop path: split directly to a chosen folder ──────────── */
+  if (isDesktop) {
+    /* Make sure we have a server-side file path.  If the user chose
+       the file via the browser <input> we upload it to a temp location
+       first so that split-to-folder can use it. */
+    let filePath = _splitDesktopFile;
+    if (!filePath) {
+      if (!input.files.length) {
+        showResult('split-result', 'Please select a PDF file.', 'error'); return;
+      }
+      /* Upload to temp */
+      const upFd = new FormData();
+      upFd.append('file', input.files[0]);
+      try {
+        spin('split-spinner', true);
+        const upRes = await fetch('/api/pdf/upload-temp', { method: 'POST', body: upFd });
+        if (!upRes.ok) { showResult('split-result', await upRes.text(), 'error'); return; }
+        const upData = await upRes.json();
+        filePath = upData.path;
+      } catch (e) {
+        showResult('split-result', 'Upload failed: ' + e, 'error'); return;
+      } finally { spin('split-spinner', false); }
+    }
+
     /* Ask user to pick output folder (default = PDF's directory) */
-    const pdfDir = _splitDesktopFile.replace(/[\\/][^\\/]+$/, '');
+    const pdfDir = filePath.replace(/[\\/][^\\/]+$/, '');
     let outDir;
     try {
-      const dlg = await fetch('/api/dialog/directory');
+      const dlg = await fetch('/api/dialog/directory?default_dir=' + encodeURIComponent(pdfDir));
       if (!dlg.ok) return;
       const d = await dlg.json();
       outDir = d.directory;
@@ -923,7 +1199,7 @@ async function splitPdf() {
     if (!outDir) { showResult('split-result', 'No folder selected.', 'error'); return; }
 
     const body = {
-      file_path: _splitDesktopFile,
+      file_path: filePath,
       output_dir: outDir,
       ranges: ranges,
       output_type: outputType,
@@ -951,6 +1227,9 @@ async function splitPdf() {
       }
 
       showResult('split-result', `Split done – ${data.written.length} file(s) written to ${outDir}`, 'success');
+      if (document.getElementById('split-open-folder').checked) {
+        await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: outDir }) });
+      }
     } finally { spin('split-spinner', false); }
     return;
   }
@@ -995,6 +1274,9 @@ async function _splitConfirmOverwrite() {
     const data = await res.json();
     if (!res.ok) { showResult('split-result', data.detail || JSON.stringify(data), 'error'); return; }
     showResult('split-result', `Split done – ${data.written.length} file(s) written.`, 'success');
+    if (document.getElementById('split-open-folder').checked) {
+      await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: _splitPendingBody.output_dir }) });
+    }
   } finally {
     spin('split-spinner', false);
     _splitPendingBody = null;
@@ -1055,9 +1337,11 @@ async function compareDirectories() {
           <label for="chk-${escId(f)}">${escHtml(f)} <em style="font-size:.75rem;color:${isMissing ? 'var(--clr-error)' : 'var(--clr-warn)'}">${isMissing ? 'missing' : 'modified'}</em></label>
         </div>`;
       });
+      document.getElementById('sync-actions').style.display = '';
       card.style.display = '';
     } else {
       list.innerHTML = '<div style="padding:var(--sp-sm);color:var(--clr-on-surface);font-size:.85rem;">All files are identical. Nothing to sync.</div>';
+      document.getElementById('sync-actions').style.display = 'none';
       card.style.display = '';
     }
   } finally { spin('compare-spinner', false); }
@@ -1104,6 +1388,15 @@ async function openFileDialog(target) {
   } catch (_) { /* not in desktop mode */ }
 }
 
+async function browseSplitFile() {
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    openFileDialog('split');
+  } else {
+    document.getElementById('split-file').click();
+  }
+}
+
 async function openDirDialog(which) {
   try {
     const res = await fetch('/api/dialog/directory');
@@ -1123,6 +1416,198 @@ async function openDirDialog(which) {
   if (s) document.getElementById('dir-source').value = s;
   if (t) document.getElementById('dir-target').value = t;
 })();
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  DEDUPLICATION                                                      */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+let _dedupPendingDelete = null; // { path, is_dir, groupEl }
+
+/* Restore last dedup dir */
+(function restoreDedupDir() {
+  const d = localStorage.getItem('dedup-dir');
+  if (d) document.getElementById('dedup-dir').value = d;
+})();
+
+async function openDedupDirDialog() {
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    try {
+      const cur = document.getElementById('dedup-dir').value.trim();
+      const qp = cur ? '?default_dir=' + encodeURIComponent(cur) : '';
+      const res = await fetch('/api/dialog/directory' + qp);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.directory) return;
+      document.getElementById('dedup-dir').value = data.directory;
+      localStorage.setItem('dedup-dir', data.directory);
+    } catch (_) { /* ignore */ }
+  } else {
+    /* Web mode: use a hidden directory input as fallback */
+    let dirInput = document.getElementById('dedup-dir-input');
+    if (!dirInput) {
+      dirInput = document.createElement('input');
+      dirInput.type = 'file';
+      dirInput.id = 'dedup-dir-input';
+      dirInput.setAttribute('webkitdirectory', '');
+      dirInput.style.display = 'none';
+      dirInput.addEventListener('change', function () {
+        if (this.files.length) {
+          /* Extract directory from first file's webkitRelativePath */
+          const rel = this.files[0].webkitRelativePath || '';
+          const dirName = rel.split('/')[0] || this.files[0].name;
+          document.getElementById('dedup-dir').value = dirName;
+          localStorage.setItem('dedup-dir', dirName);
+        }
+      });
+      document.body.appendChild(dirInput);
+    }
+    dirInput.click();
+  }
+}
+
+async function scanDedup() {
+  const dir = document.getElementById('dedup-dir').value.trim();
+  if (!dir) { showResult('dedup-result', 'Please enter a directory path.', 'error'); return; }
+  localStorage.setItem('dedup-dir', dir);
+
+  document.getElementById('dedup-groups').innerHTML = '';
+  document.getElementById('dedup-confirm-card').style.display = 'none';
+
+  try {
+    spin('dedup-spinner', true);
+    const res = await fetch('/api/dedup/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ directory: dir }),
+    });
+    const data = await res.json();
+    if (!res.ok) { showResult('dedup-result', data.detail || JSON.stringify(data), 'error'); return; }
+
+    const { dup_dirs, dup_files, stats } = data;
+    const total = dup_dirs.length + dup_files.length;
+    if (total === 0) {
+      showResult('dedup-result', 'No duplicates found.', 'success');
+    } else {
+      /* Clear any previous message – just show the groups below */
+      document.getElementById('dedup-result').className = 'result-box';
+      document.getElementById('dedup-result').textContent = '';
+    }
+
+    renderDedupGroups(dup_dirs, 'folder', 'Duplicate Directories');
+    renderDedupGroups(dup_files, 'insert_drive_file', 'Duplicate Files');
+  } finally { spin('dedup-spinner', false); }
+}
+
+function renderDedupGroups(groups, icon, sectionTitle) {
+  const container = document.getElementById('dedup-groups');
+  if (!groups.length) return;
+
+  const heading = document.createElement('div');
+  heading.style.cssText = 'font-size:.9rem;font-weight:500;color:#fff;margin:var(--sp-md) 0 var(--sp-sm);display:flex;align-items:center;gap:var(--sp-sm);';
+  heading.innerHTML = `<span class="material-icons" style="font-size:18px;color:var(--clr-primary)">${icon}</span> ${sectionTitle}`;
+  container.appendChild(heading);
+
+  groups.forEach((group, gi) => {
+    const card = document.createElement('div');
+    card.className = 'dup-group';
+    card.id = `dup-group-${icon}-${gi}`;
+
+    const hdr = document.createElement('div');
+    hdr.className = 'dup-group__header';
+    const size = group.items[0].size;
+    hdr.innerHTML = `<span class="material-icons">${icon}</span> Hash: ${group.hash.substring(0, 16)}\u2026 &nbsp;\u2013&nbsp; ${group.items.length} copies &nbsp;\u2013&nbsp; ${fileSize(size)} each`;
+    card.appendChild(hdr);
+
+    group.items.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'dup-entry';
+      row.id = 'dup-' + escId(item.path);
+
+      const pathSpan = document.createElement('span');
+      pathSpan.className = 'dup-entry__path';
+      pathSpan.title = item.path;
+      pathSpan.textContent = item.path;
+      row.appendChild(pathSpan);
+
+      const sizeSpan = document.createElement('span');
+      sizeSpan.className = 'dup-entry__size';
+      sizeSpan.textContent = fileSize(item.size);
+      row.appendChild(sizeSpan);
+
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-outline btn-sm';
+      btn.innerHTML = '<span class="material-icons" style="font-size:14px;color:var(--clr-error)">delete</span>';
+      btn.addEventListener('click', () => requestDedupDelete(item.path, !!item.is_dir, btn));
+      row.appendChild(btn);
+
+      card.appendChild(row);
+    });
+
+    container.appendChild(card);
+  });
+}
+
+function requestDedupDelete(path, isDir, btnEl) {
+  _dedupPendingDelete = { path, is_dir: isDir, btnRow: btnEl.closest('.dup-entry') };
+  document.getElementById('dedup-confirm-path').textContent =
+    `Are you sure you want to permanently delete this ${isDir ? 'directory' : 'file'}?\n\n${path}`;
+  document.getElementById('dedup-confirm-card').style.display = '';
+  document.getElementById('dedup-confirm-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function _dedupConfirmDelete() {
+  if (!_dedupPendingDelete) return;
+  const { path, is_dir, btnRow } = _dedupPendingDelete;
+  document.getElementById('dedup-confirm-card').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/dedup/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ path, is_dir }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      /* Show error inline on the row */
+      if (btnRow) {
+        btnRow.style.background = 'var(--clr-error)';
+        btnRow.style.opacity = '0.8';
+        const errMsg = document.createElement('span');
+        errMsg.style.cssText = 'color:#fff;font-size:.75rem;margin-left:var(--sp-sm);';
+        errMsg.textContent = data.detail || 'Delete failed';
+        btnRow.appendChild(errMsg);
+      }
+      return;
+    }
+
+    /* Mark the row as deleted with visual feedback */
+    if (btnRow) {
+      btnRow.style.opacity = '0.4';
+      btnRow.style.textDecoration = 'line-through';
+      btnRow.style.pointerEvents = 'none';
+      const group = btnRow.closest('.dup-group');
+      /* After brief visual feedback, remove the row */
+      setTimeout(() => {
+        btnRow.remove();
+        /* If only one entry left, remove the whole group (no longer a duplicate) */
+        if (group && group.querySelectorAll('.dup-entry').length <= 1) {
+          group.remove();
+        }
+      }, 600);
+    }
+  } catch (e) {
+    if (btnRow) {
+      btnRow.style.background = 'var(--clr-error)';
+      const errMsg = document.createElement('span');
+      errMsg.style.cssText = 'color:#fff;font-size:.75rem;margin-left:var(--sp-sm);';
+      errMsg.textContent = 'Delete failed: ' + e;
+      btnRow.appendChild(errMsg);
+    }
+  } finally {
+    _dedupPendingDelete = null;
+  }
+}
 </script>
 </body>
 </html>
