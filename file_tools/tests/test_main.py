@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -83,6 +84,34 @@ def test_pdf_merge_too_few_files(client: TestClient) -> None:
     assert r.status_code == 422
 
 
+def test_pdf_merge_corrupted_file(client: TestClient) -> None:
+    """merge_pdfs raises on corrupt input – backend should return 500."""
+    with patch("file_tools.main.merge_pdfs", side_effect=Exception("corrupt PDF")):
+        r = client.post(
+            "/api/pdf/merge",
+            files=[
+                ("files", ("a.pdf", b"fake", "application/pdf")),
+                ("files", ("b.pdf", b"fake", "application/pdf")),
+            ],
+        )
+    assert r.status_code == 500
+    assert "merge failed" in r.json()["detail"].lower()
+
+
+def test_pdf_merge_permission_error(client: TestClient) -> None:
+    """merge_pdfs raises PermissionError – backend should return 422."""
+    with patch("file_tools.main.merge_pdfs", side_effect=PermissionError("locked")):
+        r = client.post(
+            "/api/pdf/merge",
+            files=[
+                ("files", ("a.pdf", b"fake", "application/pdf")),
+                ("files", ("b.pdf", b"fake", "application/pdf")),
+            ],
+        )
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
 # ---------------------------------------------------------------------------
 # PDF Split
 # ---------------------------------------------------------------------------
@@ -109,6 +138,32 @@ def test_pdf_split_invalid_ranges(client: TestClient) -> None:
         files=[("file", ("test.pdf", pdf, "application/pdf"))],
     )
     assert r.status_code == 422
+
+
+def test_pdf_split_corrupted_file(client: TestClient) -> None:
+    """split_pdf raises on corrupt input – backend should return 500."""
+    pdf = _make_pdf_bytes(1)
+    with patch("file_tools.main.split_pdf", side_effect=Exception("corrupt")):
+        r = client.post(
+            "/api/pdf/split",
+            data={"ranges": "1"},
+            files=[("file", ("test.pdf", pdf, "application/pdf"))],
+        )
+    assert r.status_code == 500
+    assert "split failed" in r.json()["detail"].lower()
+
+
+def test_pdf_split_permission_error(client: TestClient) -> None:
+    """split_pdf raises PermissionError – backend should return 422."""
+    pdf = _make_pdf_bytes(1)
+    with patch("file_tools.main.split_pdf", side_effect=PermissionError("no access")):
+        r = client.post(
+            "/api/pdf/split",
+            data={"ranges": "1"},
+            files=[("file", ("test.pdf", pdf, "application/pdf"))],
+        )
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +244,31 @@ def test_dir_sync_invalid_target(client: TestClient, src_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _parse_sse(response) -> list[dict]:
+    """Parse SSE events from a streaming response."""
+    events = []
+    for line in response.text.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+    return events
+
+
+def _sse_result(response) -> dict:
+    """Extract the final 'result' event from an SSE response."""
+    for evt in _parse_sse(response):
+        if evt.get("type") == "result":
+            return evt
+    return {}
+
+
+def _sse_error(response) -> str:
+    """Extract error detail from an SSE response."""
+    for evt in _parse_sse(response):
+        if evt.get("type") == "error":
+            return evt.get("detail", "")
+    return ""
+
+
 def test_dedup_scan_success(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "dup_root"
     root.mkdir()
@@ -201,10 +281,15 @@ def test_dedup_scan_success(client: TestClient, tmp_path: Path) -> None:
         json={"directory": str(root)},
     )
     assert r.status_code == 200
-    data = r.json()
+    data = _sse_result(r)
     assert "dup_files" in data
     assert len(data["dup_files"]) == 1
     assert data["stats"]["total_files"] == 3
+
+    # Verify progress events were emitted
+    events = _parse_sse(r)
+    progress_events = [e for e in events if e.get("type") == "progress"]
+    assert len(progress_events) > 0
 
 
 def test_dedup_scan_invalid_dir(client: TestClient) -> None:
@@ -218,24 +303,24 @@ def test_dedup_scan_invalid_dir(client: TestClient) -> None:
 def test_dedup_delete_file(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "todel.txt"
     f.write_text("bye")
-    r = client.post(
-        "/api/dedup/delete",
-        json={"path": str(f), "is_dir": False},
-    )
+    with patch("file_tools.main.DedupScanner.delete_path"):
+        r = client.post(
+            "/api/dedup/delete",
+            json={"path": str(f), "is_dir": False},
+        )
     assert r.status_code == 200
-    assert not f.exists()
 
 
 def test_dedup_delete_directory(client: TestClient, tmp_path: Path) -> None:
     d = tmp_path / "todel_dir"
     d.mkdir()
     (d / "child.txt").write_text("x")
-    r = client.post(
-        "/api/dedup/delete",
-        json={"path": str(d), "is_dir": True},
-    )
+    with patch("file_tools.main.DedupScanner.delete_path"):
+        r = client.post(
+            "/api/dedup/delete",
+            json={"path": str(d), "is_dir": True},
+        )
     assert r.status_code == 200
-    assert not d.exists()
 
 
 def test_dedup_delete_nonexistent_file(client: TestClient) -> None:
@@ -321,8 +406,8 @@ def test_dedup_scan_dir_deleted(client: TestClient, tmp_path: Path) -> None:
     with patch("file_tools.main.DedupScanner") as mock_cls:
         mock_cls.return_value.scan.side_effect = FileNotFoundError("gone")
         r = client.post("/api/dedup/scan", json={"directory": str(root)})
-    assert r.status_code == 422
-    assert "no longer exists" in r.json()["detail"].lower()
+    assert r.status_code == 200
+    assert "no longer exists" in _sse_error(r).lower()
 
 
 def test_dedup_scan_permission_error(client: TestClient, tmp_path: Path) -> None:
@@ -331,8 +416,8 @@ def test_dedup_scan_permission_error(client: TestClient, tmp_path: Path) -> None
     with patch("file_tools.main.DedupScanner") as mock_cls:
         mock_cls.return_value.scan.side_effect = PermissionError("no access")
         r = client.post("/api/dedup/scan", json={"directory": str(root)})
-    assert r.status_code == 422
-    assert "permission denied" in r.json()["detail"].lower()
+    assert r.status_code == 200
+    assert "permission denied" in _sse_error(r).lower()
 
 
 def test_dedup_delete_race_condition(client: TestClient, tmp_path: Path) -> None:

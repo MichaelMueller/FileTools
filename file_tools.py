@@ -23,9 +23,15 @@ def run(mode: str = "desktop") -> None:
 
         run_web()
     elif mode == "desktop":
+        # Show a splash *before* the heavy imports (uvicorn, webview, etc.)
+        from file_tools.splash import Splash
+
+        splash = Splash()
+        splash.show()
+
         from file_tools.desktop import run_desktop
 
-        run_desktop()
+        run_desktop(on_ready=splash.close)
     else:
         print(f"Unknown mode '{mode}'. Use 'desktop' or 'web'.", file=sys.stderr)
         sys.exit(1)

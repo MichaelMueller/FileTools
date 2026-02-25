@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
+import json
 import zipfile
 from pathlib import Path
 from typing import Annotated
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from file_tools.tools.dir_compare import compare_directories, sync_directories
@@ -24,7 +26,7 @@ from file_tools.tools.pdf_tools import (
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="FileTools", version="0.1.0")
+app = FastAPI(title="FileTools", version="1.0.0")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -67,9 +69,18 @@ async def pdf_merge(
                 tmp.write(content)
                 tmp_paths.append(Path(tmp.name))
 
-        merged_bytes = merge_pdfs(
-            tmp_paths, dpi=dpi, max_side_px=max_side_px, margin_mm=margin_mm,
-        )
+        try:
+            merged_bytes = merge_pdfs(
+                tmp_paths, dpi=dpi, max_side_px=max_side_px, margin_mm=margin_mm,
+            )
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid input: {exc}") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+        except OSError as exc:
+            raise HTTPException(status_code=422, detail=f"Merge failed: {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
     finally:
         for p in tmp_paths:
             p.unlink(missing_ok=True)
@@ -96,34 +107,47 @@ async def pdf_split(
 
     from pypdf import PdfReader as _Reader  # noqa: PLC0415
 
-    total_pages = len(_Reader(io.BytesIO(pdf_bytes)).pages)
+    try:
+        total_pages = len(_Reader(io.BytesIO(pdf_bytes)).pages)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Cannot read PDF: {exc}") from exc
+
     if ranges.strip():
         try:
             page_ranges = parse_page_ranges(ranges, total_pages)
         except (ValueError, TypeError) as exc:
-            return JSONResponse({"detail": str(exc)}, status_code=422)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     else:
         page_ranges = [(i, i) for i in range(1, total_pages + 1)]
 
     ext = "jpg" if output_type == "jpeg" else "pdf"
     stem = Path(file.filename or "file").stem
 
-    if output_type == "jpeg":
-        # pypdfium2 needs a real file – write temp, split, then clean up
-        import tempfile
+    try:
+        if output_type == "jpeg":
+            # pypdfium2 needs a real file – write temp, split, then clean up
+            import tempfile
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(pdf_bytes)
-            tmp_path = Path(tmp.name)
-        try:
-            parts = split_pdf_to_images(tmp_path, page_ranges)
-        finally:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(pdf_bytes)
+                tmp_path = Path(tmp.name)
             try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-    else:
-        parts = split_pdf(io.BytesIO(pdf_bytes), page_ranges)
+                parts = split_pdf_to_images(tmp_path, page_ranges)
+            finally:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        else:
+            parts = split_pdf(io.BytesIO(pdf_bytes), page_ranges)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Split failed: {exc}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Split failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Split failed: {exc}") from exc
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -277,23 +301,63 @@ _dedup_db_url: str | None = None  # let DedupScanner use its default (temp dir)
 
 
 @app.post("/api/dedup/scan")
-async def dedup_scan(body: dict) -> JSONResponse:
-    """Scan a directory for duplicate files and folders."""
+async def dedup_scan(body: dict) -> StreamingResponse:
+    """Scan a directory for duplicate files and folders.
+
+    Returns a Server-Sent Events stream:
+    - ``{"type": "progress", "files": N, "dirs": N}`` during scanning
+    - ``{"type": "result", ...}`` with the final result
+    - ``{"type": "error", "detail": "..."}`` on failure
+    """
     directory = body.get("directory", "")
     root = Path(directory)
     if not root.is_dir():
         raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
 
     scanner = DedupScanner(db_url=_dedup_db_url)
-    try:
-        result = scanner.scan(root)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=422, detail=f"Directory no longer exists: {exc}") from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
-    except OSError as exc:
-        raise HTTPException(status_code=422, detail=f"Scan failed: {exc}") from exc
-    return JSONResponse(content=result)
+
+    async def _event_stream():
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_event_loop()
+
+        def _progress(files: int, dirs: int) -> None:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "progress", "files": files, "dirs": dirs},
+            )
+
+        def _do_scan() -> dict:
+            return scanner.scan(root, progress_callback=_progress)
+
+        future = loop.run_in_executor(None, _do_scan)
+
+        while not future.done():
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=0.15)
+                yield f"data: {json.dumps(msg)}\n\n"
+            except asyncio.TimeoutError:
+                pass
+
+        # Drain remaining progress messages
+        while not queue.empty():
+            msg = await queue.get()
+            yield f"data: {json.dumps(msg)}\n\n"
+
+        try:
+            result = future.result()
+            yield f"data: {json.dumps({'type': 'result', **result})}\n\n"
+        except FileNotFoundError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'Directory no longer exists: {exc}'})}\n\n"
+        except PermissionError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'Permission denied: {exc}'})}\n\n"
+        except OSError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'Scan failed: {exc}'})}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/dedup/delete")

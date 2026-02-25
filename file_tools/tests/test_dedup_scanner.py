@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -149,16 +150,18 @@ class TestDedupScanner:
         f = tmp_path / "deleteme.txt"
         f.write_text("bye")
         assert f.exists()
-        DedupScanner.delete_path(f)
-        assert not f.exists()
+        with patch("send2trash.send2trash") as mock_trash:
+            DedupScanner.delete_path(f)
+            mock_trash.assert_called_once_with(str(f.resolve()))
 
     def test_delete_directory(self, tmp_path: Path) -> None:
         d = tmp_path / "deleteme"
         d.mkdir()
         (d / "child.txt").write_text("child")
         assert d.exists()
-        DedupScanner.delete_path(d)
-        assert not d.exists()
+        with patch("send2trash.send2trash") as mock_trash:
+            DedupScanner.delete_path(d)
+            mock_trash.assert_called_once_with(str(d.resolve()))
 
     def test_delete_nonexistent_raises(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
@@ -198,4 +201,17 @@ class TestDedupScanner:
                 assert "path" in item
                 assert "size" in item
                 assert "is_dir" in item
-                assert item["is_dir"] is False
+
+    def test_progress_callback(self, dup_tree: Path, dedup_db: str) -> None:
+        """progress_callback is called with (files, dirs) during scan."""
+        scanner = DedupScanner(db_url=dedup_db)
+        calls: list[tuple[int, int]] = []
+        scanner.scan(dup_tree, progress_callback=lambda f, d: calls.append((f, d)))
+        assert len(calls) > 0
+        # Each call should have non-negative counts
+        for files, dirs in calls:
+            assert files >= 0
+            assert dirs >= 0
+        # Last call should match final totals
+        last_files, _ = calls[-1]
+        assert last_files >= 6  # at least 6 files in dup_tree

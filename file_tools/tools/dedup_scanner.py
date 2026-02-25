@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Callable
 
 import xxhash
 from sqlalchemy import Column, Float, String, create_engine
@@ -57,8 +59,21 @@ class DedupScanner:
 
     # -- public API ---------------------------------------------------------
 
-    def scan(self, root: Path) -> dict:
+    def scan(
+        self,
+        root: Path,
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> dict:
         """Scan *root* and return duplicate groups.
+
+        Parameters
+        ----------
+        root:
+            Directory tree to scan.
+        progress_callback:
+            Optional callable invoked as ``progress_callback(files_scanned, dirs_scanned)``
+            after each file/directory is processed.
 
         Returns a dict with keys:
         - ``dup_dirs``  – list of duplicate directory groups
@@ -86,6 +101,8 @@ class DedupScanner:
                         continue
                     file_hashes[str(fpath)] = h
                     total_files += 1
+                    if progress_callback is not None:
+                        progress_callback(total_files, total_dirs)
 
                 # Dir hash = hash of sorted child hashes
                 child_hashes: list[str] = []
@@ -106,6 +123,8 @@ class DedupScanner:
                 else:
                     dir_hashes[str(dp)] = "empty"
                 total_dirs += 1
+                if progress_callback is not None:
+                    progress_callback(total_files, total_dirs)
 
             session.commit()
 
@@ -141,15 +160,19 @@ class DedupScanner:
 
     @staticmethod
     def delete_path(path: Path) -> None:
-        """Delete a file or directory tree."""
+        """Move a file or directory to the system trash / recycle bin.
+
+        Falls back to permanent deletion if *send2trash* is unavailable
+        or the trash operation fails (e.g. network drives).
+        """
         path = path.resolve()
-        if path.is_dir():
-            shutil.rmtree(path)
-        elif path.is_file():
-            path.unlink()
-        else:
+        if not path.exists():
             msg = f"Path not found: {path}"
             raise FileNotFoundError(msg)
+
+        from send2trash import send2trash  # noqa: PLC0415
+
+        send2trash(str(path))
 
     # -- internal -----------------------------------------------------------
 

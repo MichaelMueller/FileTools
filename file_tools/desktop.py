@@ -49,8 +49,20 @@ def _run_server(host: str, port: int) -> None:
     server.run()
 
 
-def run_desktop(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT) -> None:
-    """Start the FastAPI server in a daemon thread and open a pywebview window."""
+def run_desktop(
+    host: str = _DEFAULT_HOST,
+    port: int = _DEFAULT_PORT,
+    *,
+    on_ready: object | None = None,
+) -> None:
+    """Start the FastAPI server in a daemon thread and open a pywebview window.
+
+    Parameters
+    ----------
+    on_ready:
+        Optional callable invoked just before the webview event-loop starts
+        (e.g. to close a splash screen).
+    """
     # Set a custom AppUserModelID so Windows shows our icon in the taskbar
     # instead of the default Python icon.
     import ctypes  # noqa: PLC0415
@@ -96,6 +108,10 @@ def run_desktop(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT) -> None:
 
     window.events.loaded += _on_loaded
     window.events.shown += _set_icon
+
+    # Close the splash just before entering the blocking webview event-loop.
+    if callable(on_ready):
+        on_ready()
 
     webview.start(gui="edgechromium", private_mode=False)
 

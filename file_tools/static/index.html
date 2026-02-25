@@ -458,6 +458,33 @@
     }
     .modal__close:hover { color: #fff; }
 
+    /* ── Progress modal ────────────────────────────────────────────── */
+    #progress-modal .modal {
+      max-width: 420px;
+      text-align: center;
+    }
+    #progress-modal .progress-spinner {
+      display: inline-block;
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--clr-outline);
+      border-top-color: var(--clr-primary);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin-bottom: var(--sp-md);
+    }
+    #progress-modal .progress-title {
+      font-size: 1rem;
+      font-weight: 500;
+      color: #fff;
+      margin-bottom: var(--sp-sm);
+    }
+    #progress-modal .progress-text {
+      font-size: .85rem;
+      color: var(--clr-on-surface);
+      min-height: 1.2em;
+    }
+
     /* ── Dedup-specific ───────────────────────────────────────────────── */
     .dup-group {
       border: 1px solid var(--clr-outline);
@@ -785,29 +812,42 @@
           <span class="material-icons" style="font-size:16px">search</span>Scan
         </button>
         <div class="spinner" id="dedup-spinner"></div>
+        <span id="dedup-progress" style="font-size:.8rem;color:var(--clr-muted);margin-left:var(--sp-sm);"></span>
       </div>
       <div class="result-box" id="dedup-result"></div>
     </div>
 
     <!-- Duplicate groups (populated by JS) -->
     <div id="dedup-groups"></div>
-
-    <!-- Delete confirmation card (hidden by default) -->
-    <div class="card" id="dedup-confirm-card" style="display:none;border:1px solid var(--clr-warn);">
-      <div class="card__title" style="color:var(--clr-warn)">
-        <span class="material-icons">warning</span> Confirm Deletion
-      </div>
-      <p class="card__desc" id="dedup-confirm-path" style="word-break:break-all;"></p>
-      <div class="action-row" style="margin-top:var(--sp-sm)">
-        <button class="btn btn-primary" style="background:var(--clr-error)" id="dedup-confirm-btn" onclick="_dedupConfirmDelete()">
-          <span class="material-icons" style="font-size:16px">delete_forever</span>Delete
-        </button>
-        <button class="btn btn-outline" onclick="document.getElementById('dedup-confirm-card').style.display='none'">Cancel</button>
-      </div>
-    </div>
   </section>
 
 </main>
+
+<!-- ── Progress modal (blocks UI during long operations) ──────────── -->
+<div class="modal-overlay" id="progress-modal">
+  <div class="modal">
+    <div class="progress-spinner"></div>
+    <div class="progress-title" id="progress-title">Processing…</div>
+    <div class="progress-text" id="progress-text"></div>
+  </div>
+</div>
+
+<!-- ── Delete confirmation modal ─────────────────────────────────── -->
+<div class="modal-overlay" id="dedup-delete-modal" onclick="if(event.target===this)_dedupCancelDelete()">
+  <div class="modal" style="max-width:520px;">
+    <button class="modal__close" onclick="_dedupCancelDelete()">&times;</button>
+    <h2 style="color:var(--clr-warn)">
+      <span class="material-icons">warning</span> Move to Recycle Bin
+    </h2>
+    <p id="dedup-confirm-path" style="word-break:break-all;"></p>
+    <div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md);justify-content:flex-end;">
+      <button class="btn btn-outline" onclick="_dedupCancelDelete()">Cancel</button>
+      <button class="btn btn-primary" style="background:var(--clr-error)" onclick="_dedupConfirmDelete()">
+        <span class="material-icons" style="font-size:16px">delete_forever</span>Delete
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══════════════ IMPRINT MODAL ═══════════════════════════════════ -->
 <div class="modal-overlay" id="modal-imprint" onclick="if(event.target===this)this.classList.remove('open')">
@@ -928,6 +968,19 @@ function showResult(id, text, type = '') {
 function spin(id, on) {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('show', on);
+}
+
+/* ── Progress modal helpers ────────────────────────────────────────── */
+function showProgress(title, text) {
+  document.getElementById('progress-title').textContent = title || 'Processing…';
+  document.getElementById('progress-text').textContent = text || '';
+  document.getElementById('progress-modal').classList.add('open');
+}
+function updateProgress(text) {
+  document.getElementById('progress-text').textContent = text || '';
+}
+function hideProgress() {
+  document.getElementById('progress-modal').classList.remove('open');
 }
 
 /* ── Extract error detail from a fetch Response ────────────────────── */
@@ -1096,11 +1149,12 @@ async function mergePdfs() {
   if (_mergeDesktopFiles.length >= 2) {
     fd.append('file_paths', _mergeDesktopFiles.join('\n'));
     try {
-      spin('merge-spinner', true);
+      showProgress('Merging PDFs…', `${_mergeDesktopFiles.length} files`);
       const res = await fetch('/api/pdf/merge-by-path', { method: 'POST', body: fd });
       if (!res.ok) { showResult('merge-result', await errorDetail(res), 'error'); return; }
       const blob = await res.blob();
       if (isDesktop) {
+        hideProgress();
         const saved = await _desktopSave(blob, 'merged.pdf');
         if (!saved) { showResult('merge-result', 'Save cancelled.', 'error'); return; }
         showResult('merge-result', 'Saved to ' + saved, 'success');
@@ -1111,7 +1165,7 @@ async function mergePdfs() {
       }
     } catch (e) {
       showResult('merge-result', 'Merge failed: ' + e, 'error');
-    } finally { spin('merge-spinner', false); }
+    } finally { hideProgress(); }
     return;
   }
 
@@ -1121,11 +1175,12 @@ async function mergePdfs() {
   for (const f of _mergeFiles) fd.append('files', f.file);
 
   try {
-    spin('merge-spinner', true);
+    showProgress('Merging PDFs…', `${_mergeFiles.length} files`);
     const res = await fetch('/api/pdf/merge', { method: 'POST', body: fd });
     if (!res.ok) { showResult('merge-result', await errorDetail(res), 'error'); return; }
     const blob = await res.blob();
     if (isDesktop) {
+      hideProgress();
       const saved = await _desktopSave(blob, 'merged.pdf');
       if (!saved) { showResult('merge-result', 'Save cancelled.', 'error'); return; }
       showResult('merge-result', 'Saved to ' + saved, 'success');
@@ -1136,7 +1191,7 @@ async function mergePdfs() {
     }
   } catch (e) {
     showResult('merge-result', 'Merge failed: ' + e, 'error');
-  } finally { spin('merge-spinner', false); }
+  } finally { hideProgress(); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
@@ -1194,14 +1249,14 @@ async function splitPdf() {
       const upFd = new FormData();
       upFd.append('file', input.files[0]);
       try {
-        spin('split-spinner', true);
+        showProgress('Uploading PDF…');
         const upRes = await fetch('/api/pdf/upload-temp', { method: 'POST', body: upFd });
-        if (!upRes.ok) { showResult('split-result', await errorDetail(upRes), 'error'); return; }
+        if (!upRes.ok) { hideProgress(); showResult('split-result', await errorDetail(upRes), 'error'); return; }
         const upData = await upRes.json();
         filePath = upData.path;
       } catch (e) {
         showResult('split-result', 'Upload failed: ' + e, 'error'); return;
-      } finally { spin('split-spinner', false); }
+      } finally { hideProgress(); }
     }
 
     /* Ask user to pick output folder (default = PDF's directory) */
@@ -1286,7 +1341,7 @@ async function _splitConfirmOverwrite() {
   document.getElementById('split-overwrite-card').style.display = 'none';
 
   try {
-    spin('split-spinner', true);
+    showProgress('Splitting PDF…', 'Overwriting existing files');
     const res = await fetch('/api/pdf/split-to-folder', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1299,7 +1354,7 @@ async function _splitConfirmOverwrite() {
       await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: _splitPendingBody.output_dir }) });
     }
   } finally {
-    spin('split-spinner', false);
+    hideProgress();
     _splitPendingBody = null;
   }
 }
@@ -1328,7 +1383,7 @@ async function compareDirectories() {
   if (syncResult) { syncResult.className = 'result-box'; syncResult.textContent = ''; syncResult.removeAttribute('style'); }
 
   try {
-    spin('compare-spinner', true);
+    showProgress('Comparing Directories…', `${source} → ${target}`);
     const res = await fetch('/api/dir/compare', { method: 'POST', body: fd });
     if (!res.ok) { showResult('compare-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
@@ -1369,7 +1424,7 @@ async function compareDirectories() {
     }
   } catch (e) {
     showResult('compare-result', 'Compare failed: ' + e, 'error');
-  } finally { spin('compare-spinner', false); }
+  } finally { hideProgress(); }
 }
 
 function selectAll(checked) {
@@ -1388,14 +1443,14 @@ async function syncDirectories() {
   fd.append('files', checked.join('\n'));
 
   try {
-    spin('sync-spinner', true);
+    showProgress('Syncing Files…', `${checked.length} file(s)`);
     const res = await fetch('/api/dir/sync', { method: 'POST', body: fd });
     if (!res.ok) { showResult('sync-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
     showResult('sync-result', `Copied ${data.copied.length} file(s):\n${data.copied.join('\n')}`, 'success');
   } catch (e) {
     showResult('sync-result', 'Sync failed: ' + e, 'error');
-  } finally { spin('sync-spinner', false); }
+  } finally { hideProgress(); }
 }
 
 /* ── Native dialog helpers (pywebview) ─────────────────────────────── */
@@ -1499,19 +1554,48 @@ async function scanDedup() {
   localStorage.setItem('dedup-dir', dir);
 
   document.getElementById('dedup-groups').innerHTML = '';
-  document.getElementById('dedup-confirm-card').style.display = 'none';
 
   try {
-    spin('dedup-spinner', true);
+    showProgress('Scanning for Duplicates…', 'Starting…');
     const res = await fetch('/api/dedup/scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ directory: dir }),
     });
     if (!res.ok) { showResult('dedup-result', await errorDetail(res), 'error'); return; }
-    const data = await res.json();
 
-    const { dup_dirs, dup_files, stats } = data;
+    /* Read SSE stream */
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const msg = JSON.parse(line.slice(6));
+        if (msg.type === 'progress') {
+          updateProgress(`Files parsed: ${msg.files} · Dirs: ${msg.dirs}`);
+        } else if (msg.type === 'error') {
+          showResult('dedup-result', msg.detail, 'error');
+          return;
+        } else if (msg.type === 'result') {
+          result = msg;
+        }
+      }
+    }
+
+    if (!result) {
+      showResult('dedup-result', 'Scan returned no result.', 'error');
+      return;
+    }
+
+    const { dup_dirs, dup_files, stats } = result;
     const total = dup_dirs.length + dup_files.length;
     if (total === 0) {
       showResult('dedup-result', 'No duplicates found.', 'success');
@@ -1525,7 +1609,7 @@ async function scanDedup() {
     renderDedupGroups(dup_files, 'insert_drive_file', 'Duplicate Files');
   } catch (e) {
     showResult('dedup-result', 'Scan failed: ' + e, 'error');
-  } finally { spin('dedup-spinner', false); }
+  } finally { hideProgress(); }
 }
 
 function renderDedupGroups(groups, icon, sectionTitle) {
@@ -1580,15 +1664,19 @@ function renderDedupGroups(groups, icon, sectionTitle) {
 function requestDedupDelete(path, isDir, btnEl) {
   _dedupPendingDelete = { path, is_dir: isDir, btnRow: btnEl.closest('.dup-entry') };
   document.getElementById('dedup-confirm-path').textContent =
-    `Are you sure you want to permanently delete this ${isDir ? 'directory' : 'file'}?\n\n${path}`;
-  document.getElementById('dedup-confirm-card').style.display = '';
-  document.getElementById('dedup-confirm-card').scrollIntoView({ behavior: 'smooth' });
+    `Are you sure you want to move this ${isDir ? 'directory' : 'file'} to the Recycle Bin?\n\n${path}`;
+  document.getElementById('dedup-delete-modal').classList.add('open');
+}
+
+function _dedupCancelDelete() {
+  document.getElementById('dedup-delete-modal').classList.remove('open');
+  _dedupPendingDelete = null;
 }
 
 async function _dedupConfirmDelete() {
   if (!_dedupPendingDelete) return;
   const { path, is_dir, btnRow } = _dedupPendingDelete;
-  document.getElementById('dedup-confirm-card').style.display = 'none';
+  document.getElementById('dedup-delete-modal').classList.remove('open');
 
   try {
     const res = await fetch('/api/dedup/delete', {

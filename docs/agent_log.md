@@ -1,5 +1,49 @@
 # Agent Log
 
+## 2026-02-25 16:10 – Progress modal, backend error handling, SSE dedup scan
+
+- **Progress modal (UI freeze)**: Added a non-dismissible modal overlay (`#progress-modal`) that blocks UI interaction during any long-running operation. Shows a spinner, operation title, and progress text. All action functions (`mergePdfs`, `splitPdf`, `_splitConfirmOverwrite`, `compareDirectories`, `syncDirectories`, `scanDedup`) now call `showProgress(title, text)` before starting and `hideProgress()` in `finally`. The old inline `spin()` calls were replaced.
+- **Dedup SSE streaming (frontend fix)**: `scanDedup()` was still reading `res.json()` but the backend returns SSE. Rewrote to use `ReadableStream` reader + TextDecoder to parse `data:` lines. Progress events update the modal text ("Files parsed: X · Dirs: Y"). Error events show inline. Result event triggers the duplicate group rendering.
+- **Backend error handling**: Wrapped `merge_pdfs()` call in `pdf_merge` with try/except for `ValueError`, `PermissionError`, `OSError`, and generic `Exception` (→ 500). Wrapped `split_pdf()`/`split_pdf_to_images()` in `pdf_split` with the same pattern. Added try/except for PDF reading (`PdfReader`). Changed split ranges error from `JSONResponse` to `raise HTTPException` for consistency.
+- **New CSS**: `#progress-modal` styles — centered 420px modal with 36px animated spinner, title, and text.
+- **New JS helpers**: `showProgress(title, text)`, `updateProgress(text)`, `hideProgress()`.
+- **Tests**: 4 new tests — `test_pdf_merge_corrupted_file`, `test_pdf_merge_permission_error`, `test_pdf_split_corrupted_file`, `test_pdf_split_permission_error`. All mock the underlying function to raise and verify the correct HTTP status + detail message. 117 tests total, all passing.
+
+## 2026-02-25 13:40 – Splash fix, modal delete confirm, Recycle Bin, scan progress
+
+- **Splash screen fix**: Added explicit `ShowWindow(SW_SHOW)` + `UpdateWindow` after `CreateWindowExW` in `splash.py` to force the window to render immediately. Without these calls, Windows could defer painting even though `WS_VISIBLE` was set.
+- **Modal delete confirmation (Dedup)**: Replaced the bottom-card confirm/cancel buttons with a centered modal overlay dialog (`dedup-delete-modal`). Consistent with the existing imprint/privacy modal pattern. Title changed to "Move to Recycle Bin" to reflect new behavior.
+- **Delete to Recycle Bin**: `DedupScanner.delete_path()` now uses `send2trash` instead of `shutil.rmtree`/`os.unlink`. Deleted files go to the Windows Recycle Bin instead of being permanently removed. Added `Send2Trash>=1.8.0` to `pyproject.toml`.
+- **Scan progress via SSE**: The `/api/dedup/scan` endpoint now returns a `StreamingResponse` with Server-Sent Events. Progress events (`{"type":"progress","files":N,"dirs":N}`) stream in real-time during scanning. The final result or error is sent as a terminal event. Frontend `scanDedup()` reads the stream via `ReadableStream` and shows "Files parsed: X • Dirs: Y" inline during the scan.
+- **Backend**: `DedupScanner.scan()` accepts an optional `progress_callback(files, dirs)`. `main.py` uses `asyncio.Queue` + `run_in_executor` to bridge the sync scanner to the async SSE generator.
+- **Frontend**: New `dedup-progress` span, SSE stream reader in `scanDedup()`, modal dialog with `requestDedupDelete()` / `_dedupCancelDelete()`.
+- **Tests**: Updated `test_dedup_scanner.py` (send2trash mock, progress callback test), `test_main.py` (SSE parsing helpers, updated scan/delete tests). 113 tests, all passing.
+- **Rebuilt installer**.
+
+## 2026-02-25 13:20 – No console window, pre-compile .pyc, splash screen
+
+- **Console fix**: NSIS shortcuts (desktop + start menu) now launch `$INSTDIR\.venv\pythonw.exe file_tools.py` directly instead of going through `FileTools.bat`. The `.bat` is kept for CLI usage but shortcuts no longer open a console window. `SetOutPath "$INSTDIR"` sets the shortcut working directory.
+- **Pre-compile**: Added `_precompile()` build step that runs `python -m compileall` on the staged app directory. All `.pyc` files are created at build time so the first launch doesn't need to compile anything.
+- **Splash screen**: New `file_tools/splash.py` — `Splash` class creates a borderless dark Win32 window (ctypes only, no tkinter) showing "Starting FileTools…" while heavy imports and server startup happen. Displayed before importing `desktop.py`/`uvicorn`/`webview`, closed just before the webview event-loop starts via `on_ready` callback.
+- **`desktop.py`**: `run_desktop()` now accepts an `on_ready` keyword-only callback, called before `webview.start()`.
+- **`file_tools.py`**: Desktop mode now shows splash → imports desktop → calls `run_desktop(on_ready=splash.close)`.
+- **Tests**: 10 new tests in `test_splash.py` (init, show, close, wndproc handlers). Updated `test_desktop.py` (on_ready callback verified). Added `test_precompile` and NSIS shortcut assertions in `test_installer_builder.py`. 37 targeted tests, all passing.
+- **Rebuilt installer**: `build/FileTools-0.1.0-Setup.exe`.
+
+## 2026-02-25 13:05 – Move installer output to build/ (not nested)
+
+- **Change**: Modified `InstallerBuilder._output` to point to `project_root / "build"` instead of `build_dir / "output"` (`build/installer/output/`). The `.exe` installer now lands directly in `build/` rather than `build/installer/output/`.
+- **Rebuilt**: Ran full installer build. Output: `build/FileTools-0.1.0-Setup.exe`.
+- **Cleanup**: Removed old `build/installer/output/` directory.
+
+## 2026-02-25 12:51 – Fix installer: embed full Python runtime for portability
+
+- **Problem**: On a blank Windows machine the installed app showed *"Python venv launcher … did not find executable at C:\Users\mueller\…\pythonw.exe"*. The venv `--copies` flag on Windows still creates launcher stubs that redirect to the build machine's Python via `pyvenv.cfg`. Without that Python installation the app cannot start.
+- **Fix**: Added `_make_venv_portable()` step to `InstallerBuilder` that runs after venv creation + dep install. It copies the **real** Python executables (`python.exe`, `pythonw.exe`), runtime DLLs (`python3.dll`, `python313.dll`, `vcruntime140*.dll`), standard library (`Lib/`), and compiled extension modules (`DLLs/`) from the base Python installation into the venv root. Skips unneeded directories (`test`, `idlelib`, `tkinter`, `turtledemo`, `ensurepip`) to save ~30 MB. Removes `pyvenv.cfg` so the embedded Python doesn't try to redirect.
+- **Launcher updated**: `.venv\pythonw.exe` (real exe at venv root) instead of `.venv\Scripts\pythonw.exe` (launcher stub).
+- **Installer size**: 19 MB → 26 MB (includes stdlib + DLLs, but skips test suite).
+- **Tests**: 2 new tests (`test_make_venv_portable`, `test_base_python_dir`), updated launcher and build pipeline tests. 102 total, all passing.
+
 ## 2026-02-25 12:30 – Robust error handling for deleted files/dirs
 
 - **Problem**: If files or directories were deleted externally while referenced in the app, clicking Merge/Split/Compare/Sync/Delete could produce raw errors or browser alerts instead of user-friendly messages.

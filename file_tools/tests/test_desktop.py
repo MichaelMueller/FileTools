@@ -89,7 +89,8 @@ def test_run_desktop_starts_server_and_webview() -> None:
     ):
         from file_tools.desktop import run_desktop
 
-        run_desktop(host="127.0.0.1", port=9876)
+        on_ready = MagicMock()
+        run_desktop(host="127.0.0.1", port=9876, on_ready=on_ready)
 
         # Thread was created with _run_server and started as daemon
         mock_thread_cls.assert_called_once()
@@ -112,6 +113,9 @@ def test_run_desktop_starts_server_and_webview() -> None:
         # Events were registered
         mock_loaded_event.__iadd__.assert_called_once()
         mock_shown_event.__iadd__.assert_called_once()
+
+        # on_ready callback invoked before webview.start()
+        on_ready.assert_called_once()
 
         # webview.start() called
         mock_webview.start.assert_called_once_with(

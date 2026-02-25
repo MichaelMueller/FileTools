@@ -138,6 +138,9 @@ class TestSteps:
         assert "FileTools" in content
         assert "MUI2.nsh" in content
         assert "Uninstall" in content
+        # Shortcuts must point to pythonw.exe directly (no console)
+        assert ".venv\\pythonw.exe" in content
+        assert "file_tools.py" in content
 
     def test_write_nsis_script_no_icon(self, builder: InstallerBuilder) -> None:
         builder._clean()
@@ -163,6 +166,16 @@ class TestSteps:
         assert (dest / "file_tools" / "__init__.py").exists()
         assert (dest / "file_tools.py").exists()
         assert (dest / "icon.ico").exists()
+
+    def test_precompile(self, builder: InstallerBuilder) -> None:
+        builder._clean()
+        builder._create_staging()
+        with patch("subprocess.check_call") as mock_call:
+            builder._precompile()
+            mock_call.assert_called_once()
+            args = mock_call.call_args[0][0]
+            assert "-m" in args
+            assert "compileall" in args
 
     def test_compile_nsis_success(self, builder: InstallerBuilder) -> None:
         builder._clean()
@@ -297,6 +310,7 @@ class TestBuild:
             patch.object(builder, "_create_venv"),
             patch.object(builder, "_install_deps"),
             patch.object(builder, "_make_venv_portable"),
+            patch.object(builder, "_precompile"),
             patch.object(builder, "_compile_nsis", side_effect=_fake_compile),
         ):
             result = builder.build()

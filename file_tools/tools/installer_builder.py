@@ -37,7 +37,7 @@ class InstallerBuilder:
     ]
 
     APP_NAME = "FileTools"
-    APP_VERSION = "0.1.0"
+    APP_VERSION = "1.0.0"
     APP_PUBLISHER = "Dr. Michael Müller"
     APP_EXE_NAME = "FileTools.bat"
 
@@ -55,7 +55,7 @@ class InstallerBuilder:
         self.python_exe = python_exe or sys.executable
 
         self._staging = self.build_dir / "staging"
-        self._output = self.build_dir / "output"
+        self._output = self.project_root / "build"
 
     # ------------------------------------------------------------------
     # Public API
@@ -69,6 +69,7 @@ class InstallerBuilder:
         self._install_deps()
         self._make_venv_portable()
         self._copy_source()
+        self._precompile()
         self._write_launcher()
         nsi_path = self._write_nsis_script()
         installer = self._compile_nsis(nsi_path)
@@ -199,6 +200,16 @@ class InstallerBuilder:
         if icon_src.exists():
             shutil.copy2(icon_src, dest / "icon.ico")
 
+    def _precompile(self) -> None:
+        """Pre-compile all ``.py`` files to ``.pyc`` so the first launch is fast."""
+        python = self._staging / "app" / ".venv" / "python.exe"
+        app_dir = self._staging / "app"
+        subprocess.check_call(
+            [str(python), "-m", "compileall", "-q", "-f", str(app_dir)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
     def _write_launcher(self) -> None:
         """Write a batch launcher that starts the app from the portable venv."""
         bat = self._staging / "app" / self.APP_EXE_NAME
@@ -265,17 +276,19 @@ class InstallerBuilder:
                 ; Store install dir
                 WriteRegStr HKCU "Software\\{self.APP_NAME}" "InstallDir" "$INSTDIR"
 
-                ; Start Menu shortcut
+                ; Start Menu shortcut — launch pythonw.exe directly (no console)
                 CreateDirectory "$SMPROGRAMS\\{self.APP_NAME}"
+                SetOutPath "$INSTDIR"
                 CreateShortCut "$SMPROGRAMS\\{self.APP_NAME}\\{self.APP_NAME}.lnk" \\
-                    "$INSTDIR\\{self.APP_EXE_NAME}" "" \\
+                    "$INSTDIR\\.venv\\pythonw.exe" "file_tools.py" \\
                     {"$INSTDIR\\icon.ico" if has_icon else ""}
                 CreateShortCut "$SMPROGRAMS\\{self.APP_NAME}\\Uninstall.lnk" \\
                     "$INSTDIR\\Uninstall.exe"
 
-                ; Desktop shortcut
+                ; Desktop shortcut — launch pythonw.exe directly (no console)
+                SetOutPath "$INSTDIR"
                 CreateShortCut "$DESKTOP\\{self.APP_NAME}.lnk" \\
-                    "$INSTDIR\\{self.APP_EXE_NAME}" "" \\
+                    "$INSTDIR\\.venv\\pythonw.exe" "file_tools.py" \\
                     {"$INSTDIR\\icon.ico" if has_icon else ""}
             SectionEnd
 
