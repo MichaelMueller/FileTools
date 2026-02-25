@@ -255,6 +255,128 @@ def test_dedup_delete_nonexistent_dir(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Error handling – files/dirs deleted during operation
+# ---------------------------------------------------------------------------
+
+
+def test_dir_compare_deleted_mid_operation(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
+    """compare_directories raises FileNotFoundError if a dir disappears."""
+    with patch("file_tools.main.compare_directories", side_effect=FileNotFoundError("src gone")):
+        r = client.post(
+            "/api/dir/compare",
+            data={"source": str(src_dir), "target": str(tgt_dir)},
+        )
+    assert r.status_code == 422
+    assert "no longer exists" in r.json()["detail"].lower()
+
+
+def test_dir_compare_os_error(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
+    """compare_directories raises OSError if a dir is unreadable."""
+    with patch("file_tools.main.compare_directories", side_effect=OSError("access denied")):
+        r = client.post(
+            "/api/dir/compare",
+            data={"source": str(src_dir), "target": str(tgt_dir)},
+        )
+    assert r.status_code == 422
+    assert "cannot read" in r.json()["detail"].lower()
+
+
+def test_dir_sync_file_deleted(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
+    """sync_directories raises FileNotFoundError when a file vanishes."""
+    with patch("file_tools.main.sync_directories", side_effect=FileNotFoundError("a.txt gone")):
+        r = client.post(
+            "/api/dir/sync",
+            data={"source": str(src_dir), "target": str(tgt_dir), "files": "a.txt"},
+        )
+    assert r.status_code == 422
+    assert "no longer exists" in r.json()["detail"].lower()
+
+
+def test_dir_sync_permission_error(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
+    """sync_directories raises PermissionError if target is not writable."""
+    with patch("file_tools.main.sync_directories", side_effect=PermissionError("read-only")):
+        r = client.post(
+            "/api/dir/sync",
+            data={"source": str(src_dir), "target": str(tgt_dir), "files": "a.txt"},
+        )
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_dir_sync_os_error(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
+    """sync_directories raises OSError for generic I/O issues."""
+    with patch("file_tools.main.sync_directories", side_effect=OSError("disk full")):
+        r = client.post(
+            "/api/dir/sync",
+            data={"source": str(src_dir), "target": str(tgt_dir)},
+        )
+    assert r.status_code == 422
+    assert "sync failed" in r.json()["detail"].lower()
+
+
+def test_dedup_scan_dir_deleted(client: TestClient, tmp_path: Path) -> None:
+    """DedupScanner.scan() raises FileNotFoundError if dir is removed."""
+    root = tmp_path / "vanishing"
+    root.mkdir()
+    with patch("file_tools.main.DedupScanner") as mock_cls:
+        mock_cls.return_value.scan.side_effect = FileNotFoundError("gone")
+        r = client.post("/api/dedup/scan", json={"directory": str(root)})
+    assert r.status_code == 422
+    assert "no longer exists" in r.json()["detail"].lower()
+
+
+def test_dedup_scan_permission_error(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "locked"
+    root.mkdir()
+    with patch("file_tools.main.DedupScanner") as mock_cls:
+        mock_cls.return_value.scan.side_effect = PermissionError("no access")
+        r = client.post("/api/dedup/scan", json={"directory": str(root)})
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_dedup_delete_race_condition(client: TestClient, tmp_path: Path) -> None:
+    """File passes existence check but is deleted before delete_path runs."""
+    f = tmp_path / "race.txt"
+    f.write_text("temp")
+    with patch("file_tools.main.DedupScanner.delete_path", side_effect=FileNotFoundError("gone")):
+        r = client.post("/api/dedup/delete", json={"path": str(f), "is_dir": False})
+    assert r.status_code == 404
+    assert "no longer exists" in r.json()["detail"].lower()
+
+
+def test_dedup_delete_permission_denied(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "locked.txt"
+    f.write_text("locked")
+    with patch("file_tools.main.DedupScanner.delete_path", side_effect=PermissionError("denied")):
+        r = client.post("/api/dedup/delete", json={"path": str(f), "is_dir": False})
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_split_to_folder_file_deleted(client: TestClient, tmp_path: Path) -> None:
+    """PDF disappears after validation but before splitting."""
+    pdf_path = tmp_path / "test.pdf"
+    pdf_path.write_bytes(_make_pdf_bytes(2))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    with patch("file_tools.main.split_pdf", side_effect=FileNotFoundError("gone")):
+        r = client.post(
+            "/api/pdf/split-to-folder",
+            json={
+                "file_path": str(pdf_path),
+                "output_dir": str(out_dir),
+                "ranges": "",
+                "output_type": "pdf",
+                "confirmed": True,
+            },
+        )
+    assert r.status_code == 422
+    assert "no longer exists" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
 # Mode check
 # ---------------------------------------------------------------------------
 

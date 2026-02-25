@@ -122,8 +122,10 @@ class TestSteps:
         bat = builder._staging / "app" / InstallerBuilder.APP_EXE_NAME
         assert bat.exists()
         content = bat.read_text(encoding="utf-8")
-        assert "pythonw.exe" in content
+        assert ".venv\\pythonw.exe" in content
         assert "file_tools.py" in content
+        # Must NOT reference Scripts (old broken path)
+        assert "Scripts" not in content
 
     def test_write_nsis_script(self, builder: InstallerBuilder) -> None:
         builder._clean()
@@ -201,6 +203,65 @@ class TestSteps:
             args = mock_call.call_args[0][0]
             assert "pip.exe" in args[0] or "pip" in str(args[0])
 
+    def test_make_venv_portable(self, builder: InstallerBuilder, tmp_path: Path) -> None:
+        builder._clean()
+        builder._create_staging()
+        venv_dir = builder._staging / "app" / ".venv"
+        venv_dir.mkdir(parents=True, exist_ok=True)
+        venv_lib = venv_dir / "Lib" / "site-packages"
+        venv_lib.mkdir(parents=True)
+        (venv_lib / "some_pkg.py").write_text("# installed package")
+        # Create a fake pyvenv.cfg
+        (venv_dir / "pyvenv.cfg").write_text("home = C:\\Fake\\Python313\n")
+
+        # Create a fake base Python directory
+        fake_base = tmp_path / "fake_python"
+        fake_base.mkdir()
+        (fake_base / "python.exe").write_bytes(b"EXE")
+        (fake_base / "pythonw.exe").write_bytes(b"EXE")
+        (fake_base / "python3.dll").write_bytes(b"DLL")
+        lib_dir = fake_base / "Lib"
+        lib_dir.mkdir()
+        (lib_dir / "os.py").write_text("# stdlib os")
+        (lib_dir / "pathlib").mkdir()
+        (lib_dir / "pathlib" / "__init__.py").write_text("# pathlib")
+        # Dirs that should be skipped
+        (lib_dir / "test").mkdir()
+        (lib_dir / "test" / "big.py").write_text("# test")
+        (lib_dir / "idlelib").mkdir()
+        (lib_dir / "idlelib" / "idle.py").write_text("# idle")
+        (lib_dir / "site-packages").mkdir()
+        (lib_dir / "site-packages" / "old.py").write_text("# old")
+        dlls_dir = fake_base / "DLLs"
+        dlls_dir.mkdir()
+        (dlls_dir / "_ssl.pyd").write_bytes(b"PYD")
+
+        with patch.object(builder, "_base_python_dir", return_value=fake_base):
+            builder._make_venv_portable()
+
+        # Real executables copied to venv root
+        assert (venv_dir / "python.exe").exists()
+        assert (venv_dir / "pythonw.exe").exists()
+        assert (venv_dir / "python3.dll").exists()
+        # Stdlib copied (excluding skipped dirs)
+        assert (venv_dir / "Lib" / "os.py").exists()
+        assert (venv_dir / "Lib" / "pathlib" / "__init__.py").exists()
+        assert not (venv_dir / "Lib" / "test").exists()
+        assert not (venv_dir / "Lib" / "idlelib").exists()
+        # Existing site-packages preserved
+        assert (venv_dir / "Lib" / "site-packages" / "some_pkg.py").exists()
+        # site-packages from base NOT copied
+        assert not (venv_dir / "Lib" / "site-packages" / "old.py").exists()
+        # DLLs copied
+        assert (venv_dir / "DLLs" / "_ssl.pyd").exists()
+        # pyvenv.cfg removed
+        assert not (venv_dir / "pyvenv.cfg").exists()
+
+    def test_base_python_dir(self, builder: InstallerBuilder) -> None:
+        with patch("subprocess.check_output", return_value="C:\\Python313\n"):
+            result = builder._base_python_dir()
+            assert result == Path("C:\\Python313")
+
 
 # ---------------------------------------------------------------------------
 # Full build (mocked external calls)
@@ -235,6 +296,7 @@ class TestBuild:
         with (
             patch.object(builder, "_create_venv"),
             patch.object(builder, "_install_deps"),
+            patch.object(builder, "_make_venv_portable"),
             patch.object(builder, "_compile_nsis", side_effect=_fake_compile),
         ):
             result = builder.build()

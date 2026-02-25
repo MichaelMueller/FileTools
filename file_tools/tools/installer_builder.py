@@ -67,6 +67,7 @@ class InstallerBuilder:
         self._create_staging()
         self._create_venv()
         self._install_deps()
+        self._make_venv_portable()
         self._copy_source()
         self._write_launcher()
         nsi_path = self._write_nsis_script()
@@ -106,6 +107,79 @@ class InstallerBuilder:
             stderr=subprocess.DEVNULL,
         )
 
+    # Stdlib directories that are not needed at runtime
+    _STDLIB_SKIP = {
+        "test", "tests", "idlelib", "tkinter", "turtledemo",
+        "ensurepip", "site-packages", "__pycache__",
+    }
+
+    def _make_venv_portable(self) -> None:
+        """Embed the real Python runtime so the venv works without a system Python.
+
+        On Windows the venv ``Scripts/pythonw.exe`` is a launcher stub that
+        redirects to the base Python via ``pyvenv.cfg``.  On a machine without
+        that base installation the launcher fails.  This method copies the real
+        Python executables, DLLs, and standard library into the venv root so
+        that it is fully self-contained.
+        """
+        venv_dir = self._staging / "app" / ".venv"
+        base = self._base_python_dir()
+
+        # 1. Copy real executables and runtime DLLs into the venv root.
+        #    Python looks for Lib/ and DLLs/ relative to the exe it runs from.
+        for name in (
+            "python.exe", "pythonw.exe", "python3.dll",
+            f"python{sys.version_info.major}{sys.version_info.minor}.dll",
+            "vcruntime140.dll", "vcruntime140_1.dll",
+        ):
+            src = base / name
+            if src.is_file():
+                shutil.copy2(src, venv_dir / name)
+
+        # 2. Copy the standard library (Lib/) into the venv – merge with the
+        #    existing Lib/site-packages/ that pip already populated.
+        base_lib = base / "Lib"
+        venv_lib = venv_dir / "Lib"
+        if base_lib.is_dir():
+            for item in base_lib.iterdir():
+                if item.name.lower() in self._STDLIB_SKIP:
+                    continue
+                dest = venv_lib / item.name
+                if item.is_dir():
+                    if not dest.exists():
+                        shutil.copytree(
+                            item, dest,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                        )
+                elif item.is_file():
+                    shutil.copy2(item, dest)
+
+        # 3. Copy compiled extension modules (DLLs/)
+        base_dlls = base / "DLLs"
+        venv_dlls = venv_dir / "DLLs"
+        if base_dlls.is_dir():
+            if venv_dlls.exists():
+                shutil.rmtree(venv_dlls)
+            shutil.copytree(
+                base_dlls, venv_dlls,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+
+        # 4. Remove pyvenv.cfg so the embedded Python doesn't try to act as a
+        #    venv (with an invalid ``home`` path).
+        cfg = venv_dir / "pyvenv.cfg"
+        if cfg.exists():
+            cfg.unlink()
+
+    def _base_python_dir(self) -> Path:
+        """Return the base Python installation directory."""
+        # When running inside a venv, sys.base_prefix points at the real installation.
+        result = subprocess.check_output(
+            [self.python_exe, "-c", "import sys; print(sys.base_prefix)"],
+            text=True,
+        ).strip()
+        return Path(result)
+
     def _copy_source(self) -> None:
         """Copy project source into the staging area."""
         dest = self._staging / "app"
@@ -131,7 +205,7 @@ class InstallerBuilder:
         bat.write_text(
             '@echo off\r\n'
             'cd /d "%~dp0"\r\n'
-            '".venv\\Scripts\\pythonw.exe" file_tools.py %*\r\n',
+            '".venv\\pythonw.exe" file_tools.py %*\r\n',
             encoding="utf-8",
         )
 

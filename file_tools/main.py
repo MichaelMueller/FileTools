@@ -195,7 +195,11 @@ async def pdf_split_to_folder(body: dict) -> JSONResponse:
             parts = split_pdf_to_images(file_path, page_ranges, dpi=dpi)
         else:
             parts = split_pdf(file_path, page_ranges)
-    except (ValueError, ImportError) as exc:
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=f"PDF file no longer exists: {file_path}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {file_path}") from exc
+    except (ValueError, ImportError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     written: list[str] = []
@@ -224,7 +228,12 @@ async def dir_compare(
         raise HTTPException(status_code=422, detail=f"Source is not a directory: {source}")
     if not tgt.is_dir():
         raise HTTPException(status_code=422, detail=f"Target is not a directory: {target}")
-    result = compare_directories(src, tgt)
+    try:
+        result = compare_directories(src, tgt)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=f"Directory no longer exists: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Cannot read directory: {exc}") from exc
     return JSONResponse(content=result)
 
 
@@ -249,7 +258,14 @@ async def dir_sync(
     if files:
         files_list = [f.strip() for f in files.splitlines() if f.strip()]
 
-    copied = sync_directories(src, tgt, files_list)
+    try:
+        copied = sync_directories(src, tgt, files_list)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=f"File or directory no longer exists: {exc}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Sync failed: {exc}") from exc
     return JSONResponse(content={"copied": copied})
 
 
@@ -269,7 +285,14 @@ async def dedup_scan(body: dict) -> JSONResponse:
         raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
 
     scanner = DedupScanner(db_url=_dedup_db_url)
-    result = scanner.scan(root)
+    try:
+        result = scanner.scan(root)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=f"Directory no longer exists: {exc}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Scan failed: {exc}") from exc
     return JSONResponse(content=result)
 
 
@@ -285,7 +308,14 @@ async def dedup_delete(body: dict) -> JSONResponse:
     if not is_dir and not target.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {path_str}")
 
-    DedupScanner.delete_path(target)
+    try:
+        DedupScanner.delete_path(target)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Path no longer exists: {path_str}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied – cannot delete: {path_str}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Delete failed: {exc}") from exc
     return JSONResponse(content={"deleted": path_str})
 
 

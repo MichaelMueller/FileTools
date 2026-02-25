@@ -1,5 +1,12 @@
 # Agent Log
 
+## 2026-02-25 12:30 – Robust error handling for deleted files/dirs
+
+- **Problem**: If files or directories were deleted externally while referenced in the app, clicking Merge/Split/Compare/Sync/Delete could produce raw errors or browser alerts instead of user-friendly messages.
+- **Backend** (`main.py`): Wrapped all file-system operations (`compare_directories`, `sync_directories`, `DedupScanner.scan`, `DedupScanner.delete_path`, split-to-folder) in try/except for `FileNotFoundError`, `PermissionError`, and `OSError`. Each returns a clear JSON error with an appropriate HTTP status (422 or 404) and a human-readable `detail` message (e.g. "Directory no longer exists", "Permission denied", "Sync failed").
+- **Frontend** (`index.html`): Added `errorDetail(res)` helper that extracts the `detail` field from JSON error responses (or falls back to plain text). Replaced all `alert()` calls with inline `showResult()`. Added `try/catch` blocks to all fetch-based action functions (merge, split, compare, sync, dedup scan). Added `compare-result` div for inline compare errors. All errors now display styled inline in the relevant result box.
+- **Tests**: 11 new tests in `test_main.py` covering mid-operation file deletion, permission errors, OS errors, and race conditions for dir compare, dir sync, dedup scan, dedup delete, and split-to-folder. Total: 100 tests, all passing.
+
 ## 2026-02-25 12:11 – Add `create_installer` command (NSIS)
 
 - **New module**: `file_tools/tools/installer_builder.py` — `InstallerBuilder` class that bundles the app into a Windows NSIS installer using a portable venv + source code (no PyInstaller).

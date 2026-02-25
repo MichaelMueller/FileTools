@@ -729,6 +729,7 @@
         </button>
         <div class="spinner" id="compare-spinner"></div>
       </div>
+      <div class="result-box" id="compare-result"></div>
     </div>
 
     <!-- Sync sub-card -->
@@ -929,6 +930,18 @@ function spin(id, on) {
   if (el) el.classList.toggle('show', on);
 }
 
+/* ── Extract error detail from a fetch Response ────────────────────── */
+async function errorDetail(res) {
+  try {
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const j = await res.json();
+      return j.detail || JSON.stringify(j);
+    }
+    return await res.text();
+  } catch { return 'Unknown error (status ' + res.status + ')'; }
+}
+
 /* ── Utility ───────────────────────────────────────────────────────── */
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escId(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, '_'); }
@@ -1085,7 +1098,7 @@ async function mergePdfs() {
     try {
       spin('merge-spinner', true);
       const res = await fetch('/api/pdf/merge-by-path', { method: 'POST', body: fd });
-      if (!res.ok) { showResult('merge-result', await res.text(), 'error'); return; }
+      if (!res.ok) { showResult('merge-result', await errorDetail(res), 'error'); return; }
       const blob = await res.blob();
       if (isDesktop) {
         const saved = await _desktopSave(blob, 'merged.pdf');
@@ -1096,6 +1109,8 @@ async function mergePdfs() {
         downloadBlob(blob, 'merged.pdf');
         showResult('merge-result', 'Merge successful – download started.', 'success');
       }
+    } catch (e) {
+      showResult('merge-result', 'Merge failed: ' + e, 'error');
     } finally { spin('merge-spinner', false); }
     return;
   }
@@ -1108,7 +1123,7 @@ async function mergePdfs() {
   try {
     spin('merge-spinner', true);
     const res = await fetch('/api/pdf/merge', { method: 'POST', body: fd });
-    if (!res.ok) { showResult('merge-result', await res.text(), 'error'); return; }
+    if (!res.ok) { showResult('merge-result', await errorDetail(res), 'error'); return; }
     const blob = await res.blob();
     if (isDesktop) {
       const saved = await _desktopSave(blob, 'merged.pdf');
@@ -1119,6 +1134,8 @@ async function mergePdfs() {
       downloadBlob(blob, 'merged.pdf');
       showResult('merge-result', 'Merge successful – download started.', 'success');
     }
+  } catch (e) {
+    showResult('merge-result', 'Merge failed: ' + e, 'error');
   } finally { spin('merge-spinner', false); }
 }
 
@@ -1179,7 +1196,7 @@ async function splitPdf() {
       try {
         spin('split-spinner', true);
         const upRes = await fetch('/api/pdf/upload-temp', { method: 'POST', body: upFd });
-        if (!upRes.ok) { showResult('split-result', await upRes.text(), 'error'); return; }
+        if (!upRes.ok) { showResult('split-result', await errorDetail(upRes), 'error'); return; }
         const upData = await upRes.json();
         filePath = upData.path;
       } catch (e) {
@@ -1214,8 +1231,8 @@ async function splitPdf() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body),
       });
+      if (!res.ok) { showResult('split-result', await errorDetail(res), 'error'); return; }
       const data = await res.json();
-      if (!res.ok) { showResult('split-result', data.detail || JSON.stringify(data), 'error'); return; }
 
       if (data.conflicts && data.conflicts.length > 0) {
         /* Show overwrite warning */
@@ -1230,6 +1247,8 @@ async function splitPdf() {
       if (document.getElementById('split-open-folder').checked) {
         await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: outDir }) });
       }
+    } catch (e) {
+      showResult('split-result', 'Split failed: ' + e, 'error');
     } finally { spin('split-spinner', false); }
     return;
   }
@@ -1253,9 +1272,11 @@ async function splitPdf() {
     spin('split-spinner', true);
     const endpoint = _splitDesktopFile ? '/api/pdf/split-by-path' : '/api/pdf/split';
     const res = await fetch(endpoint, { method: 'POST', body: fd });
-    if (!res.ok) { showResult('split-result', await res.text(), 'error'); return; }
+    if (!res.ok) { showResult('split-result', await errorDetail(res), 'error'); return; }
     downloadBlob(await res.blob(), 'split.zip');
     showResult('split-result', 'Split successful – download started.', 'success');
+  } catch (e) {
+    showResult('split-result', 'Split failed: ' + e, 'error');
   } finally { spin('split-spinner', false); }
 }
 
@@ -1271,8 +1292,8 @@ async function _splitConfirmOverwrite() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(_splitPendingBody),
     });
+    if (!res.ok) { showResult('split-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
-    if (!res.ok) { showResult('split-result', data.detail || JSON.stringify(data), 'error'); return; }
     showResult('split-result', `Split done – ${data.written.length} file(s) written.`, 'success');
     if (document.getElementById('split-open-folder').checked) {
       await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: _splitPendingBody.output_dir }) });
@@ -1292,7 +1313,7 @@ let _compareResult = null;
 async function compareDirectories() {
   const source = document.getElementById('dir-source').value.trim();
   const target = document.getElementById('dir-target').value.trim();
-  if (!source || !target) { alert('Please enter both directories.'); return; }
+  if (!source || !target) { showResult('compare-result', 'Please enter both directories.', 'error'); return; }
 
   /* Remember last-used directories */
   localStorage.setItem('dir-compare-source', source);
@@ -1309,8 +1330,10 @@ async function compareDirectories() {
   try {
     spin('compare-spinner', true);
     const res = await fetch('/api/dir/compare', { method: 'POST', body: fd });
+    if (!res.ok) { showResult('compare-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
-    if (!res.ok) { alert(data.detail || JSON.stringify(data)); return; }
+    document.getElementById('compare-result').className = 'result-box';
+    document.getElementById('compare-result').textContent = '';
 
     _compareResult = data;
     const syncable = [...data.missing, ...data.modified];
@@ -1344,6 +1367,8 @@ async function compareDirectories() {
       document.getElementById('sync-actions').style.display = 'none';
       card.style.display = '';
     }
+  } catch (e) {
+    showResult('compare-result', 'Compare failed: ' + e, 'error');
   } finally { spin('compare-spinner', false); }
 }
 
@@ -1365,9 +1390,11 @@ async function syncDirectories() {
   try {
     spin('sync-spinner', true);
     const res = await fetch('/api/dir/sync', { method: 'POST', body: fd });
+    if (!res.ok) { showResult('sync-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
-    if (!res.ok) { showResult('sync-result', data.detail || JSON.stringify(data), 'error'); return; }
     showResult('sync-result', `Copied ${data.copied.length} file(s):\n${data.copied.join('\n')}`, 'success');
+  } catch (e) {
+    showResult('sync-result', 'Sync failed: ' + e, 'error');
   } finally { spin('sync-spinner', false); }
 }
 
@@ -1481,8 +1508,8 @@ async function scanDedup() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ directory: dir }),
     });
+    if (!res.ok) { showResult('dedup-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
-    if (!res.ok) { showResult('dedup-result', data.detail || JSON.stringify(data), 'error'); return; }
 
     const { dup_dirs, dup_files, stats } = data;
     const total = dup_dirs.length + dup_files.length;
@@ -1496,6 +1523,8 @@ async function scanDedup() {
 
     renderDedupGroups(dup_dirs, 'folder', 'Duplicate Directories');
     renderDedupGroups(dup_files, 'insert_drive_file', 'Duplicate Files');
+  } catch (e) {
+    showResult('dedup-result', 'Scan failed: ' + e, 'error');
   } finally { spin('dedup-spinner', false); }
 }
 
