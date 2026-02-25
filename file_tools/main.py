@@ -13,7 +13,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from file_tools.tools.dir_compare import compare_directories, sync_directories
-from file_tools.tools.pdf_tools import merge_pdfs, parse_page_ranges, split_pdf
+from file_tools.tools.pdf_tools import (
+    merge_pdfs,
+    parse_page_ranges,
+    split_pdf,
+    split_pdf_to_images,
+)
 
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
@@ -40,10 +45,15 @@ async def root() -> FileResponse:
 
 
 @app.post("/api/pdf/merge")
-async def pdf_merge(files: Annotated[list[UploadFile], File()]) -> Response:
-    """Merge multiple uploaded PDF files into one and return the result."""
+async def pdf_merge(
+    files: Annotated[list[UploadFile], File()],
+    dpi: Annotated[int, Form()] = 150,
+    max_side_px: Annotated[int, Form()] = 0,
+    margin_mm: Annotated[float, Form()] = 0.0,
+) -> Response:
+    """Merge multiple uploaded PDF/image files into one PDF and return the result."""
     if len(files) < 2:
-        raise HTTPException(status_code=422, detail="At least two PDF files are required.")
+        raise HTTPException(status_code=422, detail="At least two files are required.")
 
     tmp_paths: list[Path] = []
     try:
@@ -56,7 +66,9 @@ async def pdf_merge(files: Annotated[list[UploadFile], File()]) -> Response:
                 tmp.write(content)
                 tmp_paths.append(Path(tmp.name))
 
-        merged_bytes = merge_pdfs(tmp_paths)
+        merged_bytes = merge_pdfs(
+            tmp_paths, dpi=dpi, max_side_px=max_side_px, margin_mm=margin_mm,
+        )
     finally:
         for p in tmp_paths:
             p.unlink(missing_ok=True)
@@ -71,9 +83,14 @@ async def pdf_merge(files: Annotated[list[UploadFile], File()]) -> Response:
 @app.post("/api/pdf/split")
 async def pdf_split(
     file: Annotated[UploadFile, File()],
-    ranges: Annotated[str, Form()],
+    ranges: Annotated[str, Form()] = "",
+    output_type: Annotated[str, Form()] = "pdf",
 ) -> Response:
-    """Split an uploaded PDF according to *ranges* and return a ZIP archive."""
+    """Split an uploaded PDF according to *ranges* and return a ZIP archive.
+
+    If *ranges* is empty every page becomes its own file.
+    *output_type* can be ``pdf`` or ``jpeg``.
+    """
     import tempfile
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -82,11 +99,22 @@ async def pdf_split(
         tmp_path = Path(tmp.name)
 
     try:
-        reader_import = __import__("pypdf", fromlist=["PdfReader"])
-        total_pages = len(reader_import.PdfReader(str(tmp_path)).pages)
-        page_ranges = parse_page_ranges(ranges, total_pages)
-        parts = split_pdf(tmp_path, page_ranges)
-    except ValueError as exc:
+        from pypdf import PdfReader as _Reader  # noqa: PLC0415
+
+        total_pages = len(_Reader(str(tmp_path)).pages)
+        if ranges.strip():
+            page_ranges = parse_page_ranges(ranges, total_pages)
+        else:
+            page_ranges = [(i, i) for i in range(1, total_pages + 1)]
+
+        ext = "jpg" if output_type == "jpeg" else "pdf"
+        stem = Path(file.filename or "file").stem
+
+        if output_type == "jpeg":
+            parts = split_pdf_to_images(tmp_path, page_ranges)
+        else:
+            parts = split_pdf(tmp_path, page_ranges)
+    except (ValueError, ImportError) as exc:
         tmp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:
@@ -94,8 +122,9 @@ async def pdf_split(
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for idx, part_bytes in enumerate(parts, start=1):
-            zf.writestr(f"part_{idx:03d}.pdf", part_bytes)
+        for idx, (part_bytes, (start, end)) in enumerate(zip(parts, page_ranges), start=1):
+            rng = str(start) if start == end else f"{start}-{end}"
+            zf.writestr(f"{stem}_{rng}.{ext}", part_bytes)
     zip_buf.seek(0)
 
     return Response(
@@ -103,6 +132,74 @@ async def pdf_split(
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=split.zip"},
     )
+
+
+@app.post("/api/pdf/split-to-folder")
+async def pdf_split_to_folder(body: dict) -> JSONResponse:
+    """Split a PDF on disk into individual files in *output_dir*.
+
+    Body JSON keys:
+    - ``file_path``: source PDF path
+    - ``output_dir``: destination folder
+    - ``ranges``: optional range string; empty = one file per page
+    - ``output_type``: ``pdf`` | ``jpeg``
+    - ``dpi``: DPI for JPEG output (default 150)
+    - ``confirmed``: if *true*, overwrite existing files
+
+    When ``confirmed`` is falsy the endpoint only *checks* for
+    conflicts and returns ``{"conflicts": [...]}``; if the list is
+    empty the caller can proceed (or re-call with ``confirmed: true``).
+    """
+    file_path = Path(body.get("file_path", ""))
+    output_dir = Path(body.get("output_dir", ""))
+    ranges_str: str = body.get("ranges", "").strip()
+    output_type: str = body.get("output_type", "pdf")
+    dpi: int = int(body.get("dpi", 150))
+    confirmed: bool = bool(body.get("confirmed", False))
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=422, detail=f"PDF not found: {file_path}")
+    if not output_dir.is_dir():
+        raise HTTPException(status_code=422, detail=f"Output directory not found: {output_dir}")
+
+    from pypdf import PdfReader as _Reader  # noqa: PLC0415
+
+    total_pages = len(_Reader(str(file_path)).pages)
+    if ranges_str:
+        page_ranges = parse_page_ranges(ranges_str, total_pages)
+    else:
+        page_ranges = [(i, i) for i in range(1, total_pages + 1)]
+
+    ext = "jpg" if output_type == "jpeg" else "pdf"
+    stem = file_path.stem
+
+    # Build output file names
+    out_names: list[str] = []
+    for start, end in page_ranges:
+        rng = str(start) if start == end else f"{start}-{end}"
+        out_names.append(f"{stem}_{rng}.{ext}")
+
+    # Overwrite check
+    conflicts = [n for n in out_names if (output_dir / n).exists()]
+    if conflicts and not confirmed:
+        return JSONResponse(content={"conflicts": conflicts})
+
+    # Actually split
+    try:
+        if output_type == "jpeg":
+            parts = split_pdf_to_images(file_path, page_ranges, dpi=dpi)
+        else:
+            parts = split_pdf(file_path, page_ranges)
+    except (ValueError, ImportError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    written: list[str] = []
+    for name, data in zip(out_names, parts):
+        dest = output_dir / name
+        dest.write_bytes(data)
+        written.append(str(dest))
+
+    return JSONResponse(content={"conflicts": [], "written": written})
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +249,17 @@ async def dir_sync(
 
 
 # ---------------------------------------------------------------------------
+# Desktop mode check
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/mode")
+async def mode_check() -> JSONResponse:
+    """Return whether the app is running in desktop (pywebview) mode."""
+    return JSONResponse(content={"desktop": _webview_window is not None})
+
+
+# ---------------------------------------------------------------------------
 # pywebview native file-dialog endpoints
 # ---------------------------------------------------------------------------
 
@@ -166,9 +274,65 @@ async def dialog_files(multiple: bool = True) -> JSONResponse:
     result = _webview_window.create_file_dialog(
         _wv.OPEN_DIALOG,
         allow_multiple=multiple,
-        file_types=("PDF Files (*.pdf)", "All Files (*.*)"),
+        file_types=(
+            "Supported Files (*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp)",
+            "PDF Files (*.pdf)",
+            "Image Files (*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp)",
+            "All Files (*.*)",
+        ),
     )
     return JSONResponse(content={"files": list(result) if result else []})
+
+
+@app.get("/api/dialog/save")
+async def dialog_save(filename: str = "merged.pdf") -> JSONResponse:
+    """Open a native save-file dialog (desktop / pywebview mode only)."""
+    if _webview_window is None:
+        raise HTTPException(status_code=503, detail="Not running in desktop mode.")
+    import webview as _wv  # noqa: PLC0415
+
+    result = _webview_window.create_file_dialog(
+        _wv.SAVE_DIALOG,
+        save_filename=filename,
+        file_types=("PDF Files (*.pdf)", "All Files (*.*)"),
+    )
+    path = result if isinstance(result, str) else (result[0] if result else None)
+    return JSONResponse(content={"path": path})
+
+
+@app.post("/api/file/save")
+async def file_save(
+    path: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+) -> JSONResponse:
+    """Save an uploaded file to *path* on disk (desktop mode helper)."""
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    content = await file.read()
+    dest.write_bytes(content)
+    return JSONResponse(content={"saved": str(dest)})
+
+
+@app.post("/api/file/open")
+async def file_open(body: dict) -> JSONResponse:
+    """Open a file with the system default application."""
+    import os
+    import subprocess
+    import sys
+
+    path = body.get("path", "")
+    fpath = Path(path)
+    if not fpath.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+    if sys.platform == "win32":
+        os.startfile(str(fpath))  # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(fpath)])  # noqa: S603
+    else:
+        subprocess.Popen(["xdg-open", str(fpath)])  # noqa: S603
+
+    return JSONResponse(content={"opened": str(fpath)})
 
 
 @app.get("/api/dialog/directory")

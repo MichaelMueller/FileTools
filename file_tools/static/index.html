@@ -8,23 +8,30 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
   <style>
-    /* ── CSS Custom Properties – Dark Material Design ────────────────── */
+    /* ── CSS Custom Properties – Dark theme, blue accents ────────────── */
     :root {
-      --clr-bg:          #121212;
-      --clr-surface:     #1e1e1e;
-      --clr-surface2:    #2c2c2c;
-      --clr-primary:     #bb86fc;
-      --clr-primary-var: #3700b3;
-      --clr-secondary:   #03dac6;
-      --clr-error:       #cf6679;
-      --clr-on-bg:       #e1e1e1;
-      --clr-on-surface:  #e1e1e1;
-      --clr-on-primary:  #000000;
-      --clr-outline:     #555;
-      --elevation-1:     0 2px 4px rgba(0,0,0,.6);
-      --elevation-2:     0 4px 8px rgba(0,0,0,.7);
-      --radius:          8px;
+      --clr-bg:          #111111;
+      --clr-surface:     #1a1a1a;
+      --clr-surface2:    #222222;
+      --clr-primary:     #4a9eff;
+      --clr-primary-dim: rgba(74,158,255,.12);
+      --clr-secondary:   #66bb6a;
+      --clr-error:       #ef5350;
+      --clr-warn:        #ffb300;
+      --clr-on-bg:       #e0e0e0;
+      --clr-on-surface:  #cccccc;
+      --clr-on-primary:  #111111;
+      --clr-muted:       #888888;
+      --clr-outline:     #333333;
+      --elevation-1:     0 1px 3px rgba(0,0,0,.5);
+      --elevation-2:     0 3px 8px rgba(0,0,0,.6);
+      --radius:          6px;
       --transition:      .2s ease;
+      --sp-xs:           4px;
+      --sp-sm:           8px;
+      --sp-md:           16px;
+      --sp-lg:           24px;
+      --sp-xl:           32px;
     }
 
     /* ── Reset / Base ────────────────────────────────────────────────── */
@@ -38,10 +45,10 @@
       flex-direction: column;
       min-height: 100vh;
     }
-    a { color: var(--clr-secondary); text-decoration: none; }
+    a { color: var(--clr-primary); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    /* ── Top App Bar (Header) ─────────────────────────────────────────── */
+    /* ── Top App Bar ──────────────────────────────────────────────────── */
     header.app-bar {
       background: var(--clr-surface);
       box-shadow: var(--elevation-2);
@@ -52,257 +59,339 @@
     .app-bar__inner {
       display: flex;
       align-items: center;
-      gap: 16px;
-      padding: 0 24px;
-      height: 64px;
+      padding: 0 var(--sp-lg);
+      height: 56px;
       max-width: 1200px;
       margin: 0 auto;
       width: 100%;
     }
     .app-bar__logo {
-      font-size: 1.5rem;
+      font-size: 1.35rem;
       font-weight: 700;
-      color: var(--clr-primary);
-      letter-spacing: .04em;
+      color: #ffffff;
+      letter-spacing: .03em;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--sp-sm);
     }
-    .app-bar__spacer { flex: 1; }
-    .app-bar__nav { display: flex; gap: 4px; }
-    .app-bar__nav a {
-      color: var(--clr-on-surface);
-      padding: 8px 16px;
-      border-radius: var(--radius);
-      font-size: .9rem;
-      font-weight: 500;
-      transition: background var(--transition), color var(--transition);
-    }
-    .app-bar__nav a:hover,
-    .app-bar__nav a.active {
-      background: rgba(187,134,252,.15);
-      color: var(--clr-primary);
-      text-decoration: none;
-    }
+    .app-bar__logo .material-icons { color: var(--clr-primary); }
 
-    /* ── Sub-Navbar (Tool Tabs) ──────────────────────────────────────── */
-    nav.sub-nav {
-      background: var(--clr-surface2);
+    /* ── Tab Bar ──────────────────────────────────────────────────────── */
+    nav.tab-bar {
+      background: var(--clr-surface);
       border-bottom: 1px solid var(--clr-outline);
     }
-    .sub-nav__inner {
+    .tab-bar__inner {
       display: flex;
       gap: 0;
       max-width: 1200px;
       margin: 0 auto;
-      padding: 0 24px;
+      padding: 0 var(--sp-lg);
       overflow-x: auto;
     }
     .tab-btn {
       background: none;
       border: none;
-      color: var(--clr-on-surface);
+      color: var(--clr-muted);
       font-family: 'Roboto', sans-serif;
-      font-size: .875rem;
+      font-size: .8rem;
       font-weight: 500;
-      letter-spacing: .08em;
+      letter-spacing: .06em;
       text-transform: uppercase;
-      padding: 14px 20px;
+      padding: 12px 20px;
       cursor: pointer;
-      border-bottom: 3px solid transparent;
+      border-bottom: 2px solid transparent;
       transition: color var(--transition), border-color var(--transition);
       white-space: nowrap;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
-    .tab-btn:hover { color: var(--clr-primary); }
+    .tab-btn:hover { color: #ffffff; }
     .tab-btn.active {
       color: var(--clr-primary);
       border-bottom-color: var(--clr-primary);
     }
 
-    /* ── Main Content ────────────────────────────────────────────────── */
+    /* ── Main ─────────────────────────────────────────────────────────── */
     main {
       flex: 1;
       max-width: 1200px;
       width: 100%;
       margin: 0 auto;
-      padding: 32px 24px;
+      padding: var(--sp-xl) var(--sp-lg);
     }
     .tool-panel { display: none; }
     .tool-panel.active { display: block; }
 
-    /* ── Card ────────────────────────────────────────────────────────── */
+    /* ── Card ─────────────────────────────────────────────────────────── */
     .card {
       background: var(--clr-surface);
+      border: 1px solid var(--clr-outline);
       border-radius: var(--radius);
-      box-shadow: var(--elevation-1);
-      padding: 24px;
-      margin-bottom: 24px;
+      padding: var(--sp-lg);
+      margin-bottom: var(--sp-lg);
     }
     .card__title {
-      font-size: 1.1rem;
+      font-size: 1rem;
       font-weight: 500;
-      color: var(--clr-primary);
-      margin-bottom: 16px;
+      color: #ffffff;
+      margin-bottom: var(--sp-md);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--sp-sm);
+    }
+    .card__title .material-icons { color: var(--clr-primary); font-size: 20px; }
+    .card__desc {
+      font-size: .85rem;
+      color: var(--clr-muted);
+      margin-bottom: var(--sp-lg);
+      line-height: 1.5;
     }
 
     /* ── Form Controls ───────────────────────────────────────────────── */
-    .form-group {
-      margin-bottom: 20px;
-    }
+    .form-group { margin-bottom: var(--sp-lg); }
     label {
       display: block;
-      font-size: .85rem;
+      font-size: .8rem;
       font-weight: 500;
-      color: var(--clr-outline);
-      margin-bottom: 6px;
-      letter-spacing: .04em;
+      color: var(--clr-muted);
+      margin-bottom: var(--sp-xs);
+      letter-spacing: .03em;
     }
     input[type="text"],
-    input[type="file"],
     textarea {
       width: 100%;
       background: var(--clr-surface2);
       border: 1px solid var(--clr-outline);
       border-radius: var(--radius);
-      color: var(--clr-on-surface);
+      color: var(--clr-on-bg);
       font-family: 'Roboto', sans-serif;
-      font-size: .95rem;
-      padding: 12px 16px;
+      font-size: .9rem;
+      padding: 10px 14px;
       transition: border-color var(--transition);
       outline: none;
     }
     input[type="text"]:focus,
-    textarea:focus {
-      border-color: var(--clr-primary);
-    }
-    input[type="file"] {
-      cursor: pointer;
-      padding: 10px 12px;
-    }
-    input[type="file"]::file-selector-button {
-      background: var(--clr-primary);
-      color: var(--clr-on-primary);
-      border: none;
-      border-radius: 4px;
-      padding: 6px 14px;
-      font-family: 'Roboto', sans-serif;
-      font-size: .85rem;
-      font-weight: 500;
-      cursor: pointer;
-      margin-right: 12px;
-      transition: opacity var(--transition);
-    }
-    input[type="file"]::file-selector-button:hover { opacity: .85; }
+    textarea:focus { border-color: var(--clr-primary); }
+    input[type="file"] { display: none; }
 
-    /* ── Buttons ─────────────────────────────────────────────────────── */
+    /* ── Buttons ──────────────────────────────────────────────────────── */
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 24px;
-      border-radius: 20px;
+      gap: 6px;
+      padding: 8px 20px;
+      border-radius: var(--radius);
       border: none;
       font-family: 'Roboto', sans-serif;
-      font-size: .875rem;
+      font-size: .8rem;
       font-weight: 500;
-      letter-spacing: .08em;
+      letter-spacing: .06em;
       text-transform: uppercase;
       cursor: pointer;
-      transition: opacity var(--transition), box-shadow var(--transition);
+      transition: background var(--transition), opacity var(--transition);
     }
     .btn-primary {
       background: var(--clr-primary);
       color: var(--clr-on-primary);
-      box-shadow: var(--elevation-1);
     }
-    .btn-primary:hover { opacity: .9; box-shadow: var(--elevation-2); }
+    .btn-primary:hover { opacity: .85; }
     .btn-secondary {
       background: var(--clr-secondary);
-      color: #000;
+      color: #111;
     }
-    .btn-secondary:hover { opacity: .9; }
+    .btn-secondary:hover { opacity: .85; }
     .btn-outline {
       background: transparent;
-      border: 1px solid var(--clr-primary);
-      color: var(--clr-primary);
+      border: 1px solid var(--clr-outline);
+      color: var(--clr-on-surface);
     }
-    .btn-outline:hover { background: rgba(187,134,252,.1); }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-outline:hover { background: var(--clr-surface2); }
+    .btn-sm { padding: 4px 10px; font-size: .75rem; }
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
 
-    /* ── Result / Status ─────────────────────────────────────────────── */
+    /* ── Action row (buttons + spinner + result) ─────────────────────── */
+    .action-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-md);
+      margin-top: var(--sp-lg);
+    }
     .result-box {
       background: var(--clr-surface2);
       border: 1px solid var(--clr-outline);
       border-radius: var(--radius);
-      padding: 16px;
-      font-size: .875rem;
+      padding: 14px;
+      font-size: .85rem;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-all;
-      max-height: 360px;
+      max-height: 300px;
       overflow-y: auto;
       display: none;
+      margin-top: var(--sp-md);
+      color: var(--clr-on-surface);
     }
     .result-box.show { display: block; }
     .result-box.error { border-color: var(--clr-error); color: var(--clr-error); }
-    .result-box.success { border-color: var(--clr-secondary); }
+    .result-box.success { border-color: var(--clr-secondary); color: var(--clr-secondary); }
 
-    /* ── Chip list ───────────────────────────────────────────────────── */
-    .chip-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .chip {
-      background: var(--clr-surface2);
+    /* ── File Manager List ───────────────────────────────────────────── */
+    .file-manager {
       border: 1px solid var(--clr-outline);
-      border-radius: 16px;
-      padding: 4px 14px;
-      font-size: .8rem;
-      color: var(--clr-on-surface);
+      border-radius: var(--radius);
+      background: var(--clr-surface2);
+      margin-bottom: var(--sp-lg);
     }
-    .chip.missing { border-color: var(--clr-error); color: var(--clr-error); }
-    .chip.modified { border-color: #ffb300; color: #ffb300; }
-    .chip.identical { border-color: var(--clr-secondary); color: var(--clr-secondary); }
-    .chip.extra { border-color: var(--clr-outline); }
+    .file-manager__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sp-sm) var(--sp-md);
+      border-bottom: 1px solid var(--clr-outline);
+    }
+    .file-manager__header span {
+      font-size: .8rem;
+      color: var(--clr-muted);
+    }
+    .file-manager__actions {
+      display: flex;
+      gap: var(--sp-sm);
+    }
+    .file-manager__list {
+      list-style: none;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .file-manager__empty {
+      padding: var(--sp-xl) var(--sp-md);
+      text-align: center;
+      color: var(--clr-muted);
+      font-size: .85rem;
+    }
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-sm);
+      padding: var(--sp-sm) var(--sp-md);
+      border-bottom: 1px solid var(--clr-outline);
+      transition: background var(--transition);
+    }
+    .file-item:last-child { border-bottom: none; }
+    .file-item:hover { background: rgba(255,255,255,.03); }
+    .file-item__index {
+      font-size: .75rem;
+      color: var(--clr-muted);
+      min-width: 22px;
+      text-align: center;
+    }
+    .file-item__icon {
+      font-size: 18px;
+      color: var(--clr-muted);
+    }
+    .file-item__icon.pdf { color: var(--clr-error); }
+    .file-item__icon.img { color: var(--clr-primary); }
+    .file-item__name {
+      flex: 1;
+      font-size: .85rem;
+      color: var(--clr-on-bg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-item__size {
+      font-size: .75rem;
+      color: var(--clr-muted);
+      min-width: 60px;
+      text-align: right;
+    }
+    .file-item__btn {
+      background: none;
+      border: none;
+      color: var(--clr-muted);
+      cursor: pointer;
+      padding: 2px;
+      border-radius: 4px;
+      transition: color var(--transition), background var(--transition);
+      display: flex;
+      align-items: center;
+    }
+    .file-item__btn:hover { color: #fff; background: rgba(255,255,255,.08); }
+    .file-item__btn.remove:hover { color: var(--clr-error); }
+    .file-item__btn .material-icons { font-size: 18px; }
 
-    /* ── Checkbox list ───────────────────────────────────────────────── */
-    .check-list { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+    /* ── Checkbox list (dir compare) ─────────────────────────────────── */
+    .check-list { max-height: 240px; overflow-y: auto; margin-top: var(--sp-sm); }
     .check-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
     .check-item input[type="checkbox"] { accent-color: var(--clr-primary); width: 16px; height: 16px; }
     .check-item label { margin: 0; font-size: .85rem; color: var(--clr-on-surface); font-weight: 400; }
 
-    /* ── Spinner ─────────────────────────────────────────────────────── */
+    /* ── Inline form controls (select, number) ────────────────────────── */
+    select,
+    input[type="number"] {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      color: var(--clr-on-bg);
+      font-family: 'Roboto', sans-serif;
+      font-size: .85rem;
+      padding: 8px 12px;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    select:focus,
+    input[type="number"]:focus { border-color: var(--clr-primary); }
+    select { cursor: pointer; }
+    input[type="number"] { width: 100px; }
+
+    /* ── Settings grid ────────────────────────────────────────────────── */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: var(--sp-md);
+      margin-bottom: var(--sp-lg);
+    }
+    .settings-grid .form-group { margin-bottom: 0; }
+
+    /* ── Toggle / Checkbox row ────────────────────────────────────────── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-sm);
+      margin-bottom: var(--sp-md);
+    }
+    .toggle-row input[type="checkbox"] {
+      accent-color: var(--clr-primary);
+      width: 16px;
+      height: 16px;
+    }
+    .toggle-row label {
+      margin: 0;
+      font-size: .85rem;
+      color: var(--clr-on-surface);
+      font-weight: 400;
+      cursor: pointer;
+    }
+
+    /* ── Spinner ──────────────────────────────────────────────────────── */
     .spinner {
       display: none;
-      width: 24px;
-      height: 24px;
-      border: 3px solid rgba(187,134,252,.3);
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--clr-outline);
       border-top-color: var(--clr-primary);
       border-radius: 50%;
-      animation: spin .7s linear infinite;
-      margin-left: 12px;
+      animation: spin .6s linear infinite;
     }
     .spinner.show { display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Divider ─────────────────────────────────────────────────────── */
-    .divider {
-      height: 1px;
-      background: var(--clr-outline);
-      margin: 20px 0;
-      opacity: .4;
-    }
+    /* ── Divider ──────────────────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--clr-outline); margin: var(--sp-lg) 0; }
 
-    /* ── Row ─────────────────────────────────────────────────────────── */
-    .row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+    /* ── Row ──────────────────────────────────────────────────────────── */
+    .row { display: flex; gap: var(--sp-md); align-items: flex-end; flex-wrap: wrap; }
     .row > * { flex: 1; min-width: 200px; }
     .row .btn { flex: none; }
 
@@ -310,18 +399,16 @@
     footer {
       background: var(--clr-surface);
       border-top: 1px solid var(--clr-outline);
-      padding: 20px 24px;
+      padding: var(--sp-md) var(--sp-lg);
       text-align: center;
-      font-size: .8rem;
-      color: var(--clr-outline);
+      font-size: .75rem;
+      color: var(--clr-muted);
     }
-    footer span { color: var(--clr-secondary); }
 
     /* ── Responsive ──────────────────────────────────────────────────── */
     @media (max-width: 700px) {
-      .app-bar__nav { display: none; }
-      .app-bar__inner { padding: 0 16px; }
-      main { padding: 16px; }
+      .app-bar__inner { padding: 0 var(--sp-md); }
+      main { padding: var(--sp-md); }
     }
   </style>
 </head>
@@ -334,26 +421,20 @@
       <span class="material-icons">folder_special</span>
       FileTools
     </div>
-    <div class="app-bar__spacer"></div>
-    <nav class="app-bar__nav">
-      <a href="#pdf-merge"  onclick="switchTab('pdf-merge',  this)">PDF Merge</a>
-      <a href="#pdf-split"  onclick="switchTab('pdf-split',  this)">PDF Split</a>
-      <a href="#dir-compare" onclick="switchTab('dir-compare', this)">Dir Compare</a>
-    </nav>
   </div>
 </header>
 
-<!-- ═══════════════════════════ SUB-NAVBAR ═══════════════════════════ -->
-<nav class="sub-nav" aria-label="Tool navigation">
-  <div class="sub-nav__inner">
-    <button class="tab-btn active" id="tab-pdf-merge"   onclick="switchTab('pdf-merge',   this)">
-      <span class="material-icons" style="font-size:18px">merge_type</span>PDF Merge
+<!-- ═══════════════════════════ TAB BAR ═══════════════════════════════ -->
+<nav class="tab-bar" aria-label="Tool navigation">
+  <div class="tab-bar__inner">
+    <button class="tab-btn active" id="tab-pdf-merge" onclick="switchTab('pdf-merge', this)">
+      <span class="material-icons" style="font-size:16px">merge_type</span>PDF Merge
     </button>
-    <button class="tab-btn" id="tab-pdf-split"   onclick="switchTab('pdf-split',   this)">
-      <span class="material-icons" style="font-size:18px">call_split</span>PDF Split
+    <button class="tab-btn" id="tab-pdf-split" onclick="switchTab('pdf-split', this)">
+      <span class="material-icons" style="font-size:16px">call_split</span>PDF Split
     </button>
     <button class="tab-btn" id="tab-dir-compare" onclick="switchTab('dir-compare', this)">
-      <span class="material-icons" style="font-size:18px">compare_arrows</span>Dir Compare
+      <span class="material-icons" style="font-size:16px">compare_arrows</span>Dir Compare
     </button>
   </div>
 </nav>
@@ -367,32 +448,71 @@
       <div class="card__title">
         <span class="material-icons">merge_type</span> PDF Merge
       </div>
-      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:20px;">
-        Select two or more PDF files to merge into a single document.
+      <p class="card__desc">
+        Add PDF files and images (JPG, PNG, BMP, TIFF, WebP) to merge into a single PDF.
+        Use the arrow buttons to reorder files.
       </p>
 
-      <div class="form-group">
-        <label for="merge-files">PDF Files (hold Ctrl/⌘ for multi-select)</label>
-        <div class="row">
-          <input type="file" id="merge-files" multiple accept=".pdf" />
-          <button class="btn btn-outline" id="merge-dialog-btn" onclick="openFileDialog('merge')" title="Pick files via native dialog (desktop only)" style="white-space:nowrap">
-            <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
-          </button>
+      <!-- Hidden file input -->
+      <input type="file" id="merge-files" multiple accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.tif,.webp" />
+
+      <!-- File manager -->
+      <div class="file-manager">
+        <div class="file-manager__header">
+          <span id="merge-file-count">0 files</span>
+          <div class="file-manager__actions">
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('merge-files').click()">
+              <span class="material-icons" style="font-size:14px">add</span>Add Files
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="openFileDialog('merge')">
+              <span class="material-icons" style="font-size:14px">folder_open</span>Browse
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="mergeClearAll()">
+              <span class="material-icons" style="font-size:14px">delete_sweep</span>Clear
+            </button>
+          </div>
+        </div>
+        <ul class="file-manager__list" id="merge-list">
+          <li class="file-manager__empty" id="merge-empty">No files added yet. Click "Add Files" to begin.</li>
+        </ul>
+      </div>
+
+      <!-- Image settings -->
+      <div class="card__title" style="font-size:.9rem;margin-top:var(--sp-sm)">
+        <span class="material-icons" style="font-size:18px">tune</span> Image Settings
+      </div>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label for="merge-dpi">Quality (DPI)</label>
+          <select id="merge-dpi">
+            <option value="72">72 – Screen</option>
+            <option value="150" selected>150 – Standard</option>
+            <option value="200">200 – Good</option>
+            <option value="300">300 – Print</option>
+            <option value="600">600 – High</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="merge-margin">Margin (mm)</label>
+          <input type="number" id="merge-margin" value="0" min="0" max="50" step="1" />
+        </div>
+        <div class="form-group">
+          <label for="merge-max-side">Max side (px)</label>
+          <input type="number" id="merge-max-side" value="0" min="0" max="10000" step="100" placeholder="0 = no limit" />
         </div>
       </div>
 
-      <div class="form-group" id="merge-file-list" style="display:none">
-        <label>Selected files</label>
-        <div class="chip-list" id="merge-chips"></div>
+      <div class="toggle-row">
+        <input type="checkbox" id="merge-open-after" />
+        <label for="merge-open-after">Open PDF after creation</label>
       </div>
 
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+      <div class="action-row">
         <button class="btn btn-primary" onclick="mergePdfs()">
-          <span class="material-icons" style="font-size:18px">merge_type</span>Merge PDFs
+          <span class="material-icons" style="font-size:16px">merge_type</span>Merge
         </button>
         <div class="spinner" id="merge-spinner"></div>
       </div>
-
       <div class="result-box" id="merge-result"></div>
     </div>
   </section>
@@ -403,34 +523,69 @@
       <div class="card__title">
         <span class="material-icons">call_split</span> PDF Split
       </div>
-      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:20px;">
-        Upload a PDF and specify page ranges to split it into separate files (returned as a ZIP archive).
+      <p class="card__desc">
+        Upload a PDF and optionally specify page ranges to split it into separate files.
+        Leave ranges empty to split each page individually.
       </p>
 
       <div class="row">
         <div class="form-group" style="flex:2">
-          <label for="split-file">PDF File</label>
+          <label for="split-file-display">PDF File</label>
           <div class="row">
+            <input type="text" id="split-file-display" placeholder="No file selected" readonly />
             <input type="file" id="split-file" accept=".pdf" />
-            <button class="btn btn-outline" onclick="openFileDialog('split')" style="white-space:nowrap">
-              <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+            <button class="btn btn-outline" onclick="document.getElementById('split-file').click()" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">folder_open</span>Browse
             </button>
           </div>
         </div>
         <div class="form-group">
-          <label for="split-ranges">Page Ranges <small style="color:var(--clr-outline)">(e.g. 1-3,4-6,7)</small></label>
-          <input type="text" id="split-ranges" placeholder="1-3,4-6,7" />
+          <label for="split-ranges">Page Ranges <small style="color:var(--clr-muted)">(optional, e.g. 1-3,4-6,7)</small></label>
+          <input type="text" id="split-ranges" placeholder="empty = every page" />
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+      <div class="settings-grid">
+        <div class="form-group">
+          <label for="split-output-type">Output Format</label>
+          <select id="split-output-type">
+            <option value="pdf" selected>PDF</option>
+            <option value="jpeg">JPEG</option>
+          </select>
+        </div>
+        <div class="form-group" id="split-dpi-group" style="display:none">
+          <label for="split-dpi">DPI</label>
+          <select id="split-dpi">
+            <option value="72">72 – Screen</option>
+            <option value="150" selected>150 – Standard</option>
+            <option value="200">200 – Good</option>
+            <option value="300">300 – Print</option>
+            <option value="600">600 – High</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="action-row">
         <button class="btn btn-primary" onclick="splitPdf()">
-          <span class="material-icons" style="font-size:18px">call_split</span>Split PDF
+          <span class="material-icons" style="font-size:16px">call_split</span>Split PDF
         </button>
         <div class="spinner" id="split-spinner"></div>
       </div>
-
       <div class="result-box" id="split-result"></div>
+
+      <!-- Overwrite confirmation (hidden by default) -->
+      <div class="card" id="split-overwrite-card" style="display:none;margin-top:var(--sp-md);border:1px solid var(--clr-warn);">
+        <div class="card__title" style="color:var(--clr-warn)">
+          <span class="material-icons">warning</span> Files will be overwritten
+        </div>
+        <p class="card__desc" id="split-overwrite-list" style="white-space:pre-wrap;"></p>
+        <div class="action-row" style="margin-top:var(--sp-sm)">
+          <button class="btn btn-primary" id="split-overwrite-confirm" onclick="_splitConfirmOverwrite()">
+            <span class="material-icons" style="font-size:16px">check</span>Overwrite
+          </button>
+          <button class="btn btn-outline" onclick="document.getElementById('split-overwrite-card').style.display='none'">Cancel</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -440,7 +595,7 @@
       <div class="card__title">
         <span class="material-icons">compare_arrows</span> Directory Compare
       </div>
-      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:20px;">
+      <p class="card__desc">
         Compare two directories using xxHash3-128 and optionally copy missing or modified files to the target.
       </p>
 
@@ -450,7 +605,7 @@
           <div class="row">
             <input type="text" id="dir-source" placeholder="/path/to/source" />
             <button class="btn btn-outline" onclick="openDirDialog('source')" style="white-space:nowrap">
-              <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+              <span class="material-icons" style="font-size:16px">folder_open</span>Browse
             </button>
           </div>
         </div>
@@ -459,39 +614,35 @@
           <div class="row">
             <input type="text" id="dir-target" placeholder="/path/to/target" />
             <button class="btn btn-outline" onclick="openDirDialog('target')" style="white-space:nowrap">
-              <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+              <span class="material-icons" style="font-size:16px">folder_open</span>Browse
             </button>
           </div>
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+      <div class="action-row">
         <button class="btn btn-primary" onclick="compareDirectories()">
-          <span class="material-icons" style="font-size:18px">compare_arrows</span>Compare
+          <span class="material-icons" style="font-size:16px">compare_arrows</span>Compare
         </button>
         <div class="spinner" id="compare-spinner"></div>
       </div>
-
-      <div class="result-box" id="compare-result"></div>
     </div>
 
-    <!-- Sync sub-card (shown after compare) -->
+    <!-- Sync sub-card -->
     <div class="card" id="sync-card" style="display:none">
       <div class="card__title">
         <span class="material-icons">sync</span> Sync – Copy to Target
       </div>
-      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:16px;">
-        Select which missing/modified files to copy from source to target.
-      </p>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-outline" style="padding:6px 14px;font-size:.8rem" onclick="selectAll(true)">Select All</button>
-        <button class="btn btn-outline" style="padding:6px 14px;font-size:.8rem" onclick="selectAll(false)">Deselect All</button>
+      <p class="card__desc">Select which missing/modified files to copy from source to target.</p>
+      <div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-md)">
+        <button class="btn btn-outline btn-sm" onclick="selectAll(true)">Select All</button>
+        <button class="btn btn-outline btn-sm" onclick="selectAll(false)">Deselect All</button>
       </div>
       <div class="check-list" id="sync-file-list"></div>
       <div class="divider"></div>
-      <div style="display:flex;align-items:center;gap:12px">
+      <div class="action-row" style="margin-top:0">
         <button class="btn btn-secondary" onclick="syncDirectories()">
-          <span class="material-icons" style="font-size:18px">sync</span>Copy Selected Files
+          <span class="material-icons" style="font-size:16px">sync</span>Copy Selected
         </button>
         <div class="spinner" id="sync-spinner"></div>
       </div>
@@ -503,25 +654,25 @@
 
 <!-- ═══════════════════════════ FOOTER ═══════════════════════════════ -->
 <footer>
-  <span>FileTools</span> &mdash; PDF merge &amp; split &bull; Directory compare &bull;
-  Built with FastAPI &amp; pywebview &mdash; Dark Material Design &copy; 2024
+  FileTools &mdash; PDF merge &amp; split &bull; Directory compare &bull;
+  Built with FastAPI &amp; pywebview
 </footer>
 
 <!-- ═══════════════════════════ JAVASCRIPT ═══════════════════════════ -->
 <script>
 'use strict';
 
+/* ── Constants ─────────────────────────────────────────────────────── */
+const IMAGE_EXTS = new Set(['jpg','jpeg','png','bmp','tiff','tif','webp']);
+const PDF_EXTS   = new Set(['pdf']);
+
 /* ── Tab switching ─────────────────────────────────────────────────── */
-function switchTab(id, triggerEl) {
+function switchTab(id) {
   document.querySelectorAll('.tool-panel').forEach(p => p.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.app-bar__nav a').forEach(a => a.classList.remove('active'));
-
   const tabBtn = document.getElementById('tab-' + id);
   if (tabBtn) tabBtn.classList.add('active');
-  if (triggerEl && triggerEl.tagName === 'A') triggerEl.classList.add('active');
 }
 
 /* ── Show result ───────────────────────────────────────────────────── */
@@ -529,168 +680,385 @@ function showResult(id, text, type = '') {
   const el = document.getElementById(id);
   el.textContent = text;
   el.className = 'result-box show' + (type ? ' ' + type : '');
+  el.removeAttribute('style');
 }
 
 /* ── Spinner helper ────────────────────────────────────────────────── */
 function spin(id, on) {
   const el = document.getElementById(id);
-  if (el) { el.classList.toggle('show', on); }
+  if (el) el.classList.toggle('show', on);
 }
 
-/* ── Native dialog helpers (pywebview) ─────────────────────────────── */
-async function openFileDialog(target) {
-  try {
-    const res = await fetch('/api/dialog/files?multiple=true');
-    if (!res.ok) {
-      // Not in desktop mode – silently ignore (user uses the file input)
-      return;
-    }
-    const data = await res.json();
-    if (!data.files || data.files.length === 0) return;
-    if (target === 'merge') {
-      _mergeDesktopFiles = data.files;
-      renderMergeChips(data.files);
-    } else if (target === 'split') {
-      _splitDesktopFile = data.files[0];
-      document.getElementById('split-file').placeholder = data.files[0];
-    }
-  } catch (_) { /* offline / CORS – ignore */ }
+/* ── Utility ───────────────────────────────────────────────────────── */
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escId(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, '_'); }
+function fileExt(name) { return (name.split('.').pop() || '').toLowerCase(); }
+function fileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function openDirDialog(which) {
-  try {
-    const res = await fetch('/api/dialog/directory');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data.directory) return;
-    document.getElementById(which === 'source' ? 'dir-source' : 'dir-target').value = data.directory;
-  } catch (_) { /* ignore */ }
-}
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  PDF MERGE – File Manager                                          */
+/* ═══════════════════════════════════════════════════════════════════ */
 
-/* ── Merge PDF ────────────────────────────────────────────────────── */
-let _mergeDesktopFiles = [];
+let _mergeFiles = [];        // Array of { file: File, name: string, size: number }
+let _mergeDesktopFiles = []; // Array of path strings (desktop mode)
 
 document.getElementById('merge-files').addEventListener('change', function () {
-  _mergeDesktopFiles = [];
-  renderMergeChips(Array.from(this.files).map(f => f.name));
+  for (const f of this.files) {
+    _mergeFiles.push({ file: f, name: f.name, size: f.size });
+  }
+  this.value = '';
+  renderMergeList();
 });
 
-function renderMergeChips(names) {
-  const list = document.getElementById('merge-file-list');
-  const chips = document.getElementById('merge-chips');
-  chips.innerHTML = names.map(n => `<span class="chip">${escHtml(n)}</span>`).join('');
-  list.style.display = names.length ? '' : 'none';
+function renderMergeList() {
+  const list  = document.getElementById('merge-list');
+  const count = document.getElementById('merge-file-count');
+
+  if (_mergeFiles.length === 0 && _mergeDesktopFiles.length === 0) {
+    list.innerHTML = '<li class="file-manager__empty">No files added yet. Click "Add Files" to begin.</li>';
+    count.textContent = '0 files';
+    return;
+  }
+
+  // Desktop mode paths
+  if (_mergeDesktopFiles.length > 0) {
+    count.textContent = _mergeDesktopFiles.length + ' file(s)';
+    list.innerHTML = _mergeDesktopFiles.map((p, i) => {
+      const name = p.split(/[\\/]/).pop();
+      const ext = fileExt(name);
+      const iconCls = PDF_EXTS.has(ext) ? 'pdf' : IMAGE_EXTS.has(ext) ? 'img' : '';
+      return `<li class="file-item">
+        <span class="file-item__index">${i+1}</span>
+        <span class="material-icons file-item__icon ${iconCls}">${PDF_EXTS.has(ext)?'picture_as_pdf':'image'}</span>
+        <span class="file-item__name" title="${escHtml(p)}">${escHtml(name)}</span>
+        <button class="file-item__btn" onclick="mergeMove(${i},-1)" title="Move up"><span class="material-icons">arrow_upward</span></button>
+        <button class="file-item__btn" onclick="mergeMove(${i},1)" title="Move down"><span class="material-icons">arrow_downward</span></button>
+        <button class="file-item__btn remove" onclick="mergeRemove(${i})" title="Remove"><span class="material-icons">close</span></button>
+      </li>`;
+    }).join('');
+    return;
+  }
+
+  // Browser-uploaded files
+  count.textContent = _mergeFiles.length + ' file(s)';
+  list.innerHTML = _mergeFiles.map((f, i) => {
+    const ext = fileExt(f.name);
+    const iconCls = PDF_EXTS.has(ext) ? 'pdf' : IMAGE_EXTS.has(ext) ? 'img' : '';
+    const icon = PDF_EXTS.has(ext) ? 'picture_as_pdf' : 'image';
+    return `<li class="file-item">
+      <span class="file-item__index">${i + 1}</span>
+      <span class="material-icons file-item__icon ${iconCls}">${icon}</span>
+      <span class="file-item__name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <span class="file-item__size">${fileSize(f.size)}</span>
+      <button class="file-item__btn" onclick="mergeMove(${i},-1)" title="Move up"><span class="material-icons">arrow_upward</span></button>
+      <button class="file-item__btn" onclick="mergeMove(${i},1)" title="Move down"><span class="material-icons">arrow_downward</span></button>
+      <button class="file-item__btn remove" onclick="mergeRemove(${i})" title="Remove"><span class="material-icons">close</span></button>
+    </li>`;
+  }).join('');
+}
+
+function mergeMove(index, dir) {
+  const arr = _mergeDesktopFiles.length > 0 ? _mergeDesktopFiles : _mergeFiles;
+  const newIdx = index + dir;
+  if (newIdx < 0 || newIdx >= arr.length) return;
+  [arr[index], arr[newIdx]] = [arr[newIdx], arr[index]];
+  renderMergeList();
+}
+
+function mergeRemove(index) {
+  if (_mergeDesktopFiles.length > 0) {
+    _mergeDesktopFiles.splice(index, 1);
+  } else {
+    _mergeFiles.splice(index, 1);
+  }
+  renderMergeList();
+}
+
+function mergeClearAll() {
+  _mergeFiles = [];
+  _mergeDesktopFiles = [];
+  renderMergeList();
+}
+
+/* ── Merge: submit ────────────────────────────────────────────────── */
+function _mergeSettings() {
+  return {
+    dpi:         parseInt(document.getElementById('merge-dpi').value, 10) || 150,
+    margin_mm:   parseFloat(document.getElementById('merge-margin').value) || 0,
+    max_side_px: parseInt(document.getElementById('merge-max-side').value, 10) || 0,
+  };
+}
+
+let _isDesktop = null;               // cached after first probe
+async function _detectDesktop() {
+  if (_isDesktop !== null) return _isDesktop;
+  try {
+    const r = await fetch('/api/mode');
+    if (r.ok) { const d = await r.json(); _isDesktop = !!d.desktop; }
+    else { _isDesktop = false; }
+  } catch { _isDesktop = false; }
+  return _isDesktop;
+}
+
+async function _desktopSave(blob, defaultName) {
+  /* Ask native file-save dialog */
+  const dlg = await fetch('/api/dialog/save?filename=' + encodeURIComponent(defaultName));
+  if (!dlg.ok) return null;
+  const { path } = await dlg.json();
+  if (!path) return null;
+
+  /* Write blob to chosen path */
+  const fd = new FormData();
+  fd.append('file', blob, defaultName);
+  fd.append('path', path);
+  const sv = await fetch('/api/file/save', { method: 'POST', body: fd });
+  if (!sv.ok) throw new Error(await sv.text());
+  return path;
+}
+
+async function _openFile(path) {
+  await fetch('/api/file/open', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path }) });
 }
 
 async function mergePdfs() {
-  const input = document.getElementById('merge-files');
   const fd = new FormData();
+  const { dpi, margin_mm, max_side_px } = _mergeSettings();
+  fd.append('dpi', dpi);
+  fd.append('margin_mm', margin_mm);
+  fd.append('max_side_px', max_side_px);
+
+  const openAfter = document.getElementById('merge-open-after').checked;
+  const isDesktop = await _detectDesktop();
 
   if (_mergeDesktopFiles.length >= 2) {
-    // desktop mode – send file paths as text (server reads them)
     fd.append('file_paths', _mergeDesktopFiles.join('\n'));
     try {
       spin('merge-spinner', true);
       const res = await fetch('/api/pdf/merge-by-path', { method: 'POST', body: fd });
       if (!res.ok) { showResult('merge-result', await res.text(), 'error'); return; }
-      downloadBlob(await res.blob(), 'merged.pdf');
-      showResult('merge-result', '✓ Merge successful – download started.', 'success');
+      const blob = await res.blob();
+      if (isDesktop) {
+        const saved = await _desktopSave(blob, 'merged.pdf');
+        if (!saved) { showResult('merge-result', 'Save cancelled.', 'error'); return; }
+        showResult('merge-result', 'Saved to ' + saved, 'success');
+        if (openAfter) await _openFile(saved);
+      } else {
+        downloadBlob(blob, 'merged.pdf');
+        showResult('merge-result', 'Merge successful – download started.', 'success');
+      }
     } finally { spin('merge-spinner', false); }
     return;
   }
 
-  if (input.files.length < 2) {
-    showResult('merge-result', 'Please select at least 2 PDF files.', 'error'); return;
+  if (_mergeFiles.length < 2) {
+    showResult('merge-result', 'Please add at least 2 files.', 'error'); return;
   }
-  for (const f of input.files) fd.append('files', f);
+  for (const f of _mergeFiles) fd.append('files', f.file);
 
   try {
     spin('merge-spinner', true);
     const res = await fetch('/api/pdf/merge', { method: 'POST', body: fd });
     if (!res.ok) { showResult('merge-result', await res.text(), 'error'); return; }
-    downloadBlob(await res.blob(), 'merged.pdf');
-    showResult('merge-result', '✓ Merge successful – download started.', 'success');
+    const blob = await res.blob();
+    if (isDesktop) {
+      const saved = await _desktopSave(blob, 'merged.pdf');
+      if (!saved) { showResult('merge-result', 'Save cancelled.', 'error'); return; }
+      showResult('merge-result', 'Saved to ' + saved, 'success');
+      if (openAfter) await _openFile(saved);
+    } else {
+      downloadBlob(blob, 'merged.pdf');
+      showResult('merge-result', 'Merge successful – download started.', 'success');
+    }
   } finally { spin('merge-spinner', false); }
 }
 
-/* ── Split PDF ────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  PDF SPLIT                                                         */
+/* ═══════════════════════════════════════════════════════════════════ */
+
 let _splitDesktopFile = '';
+let _splitPendingBody = null;  // stashed body for overwrite-confirm flow
+
+document.getElementById('split-file').addEventListener('change', function () {
+  if (this.files.length) {
+    document.getElementById('split-file-display').value = this.files[0].name;
+  }
+});
+
+/* Show/hide DPI field when output type changes */
+document.getElementById('split-output-type').addEventListener('change', function () {
+  document.getElementById('split-dpi-group').style.display = this.value === 'jpeg' ? '' : 'none';
+});
 
 async function splitPdf() {
-  const input   = document.getElementById('split-file');
-  const ranges  = document.getElementById('split-ranges').value.trim();
-  if (!ranges) { showResult('split-result', 'Please enter page ranges.', 'error'); return; }
+  const input      = document.getElementById('split-file');
+  const ranges     = document.getElementById('split-ranges').value.trim();
+  const outputType = document.getElementById('split-output-type').value;
+  const dpi        = parseInt(document.getElementById('split-dpi').value, 10) || 150;
+  const isDesktop  = await _detectDesktop();
 
-  const fd = new FormData();
-  fd.append('ranges', ranges);
+  document.getElementById('split-overwrite-card').style.display = 'none';
 
-  if (_splitDesktopFile) {
-    fd.append('file_path', _splitDesktopFile);
+  /* ── Desktop path: split directly to a folder ─────────────────── */
+  if (isDesktop && _splitDesktopFile) {
+    /* Ask user to pick output folder (default = PDF's directory) */
+    const pdfDir = _splitDesktopFile.replace(/[\\/][^\\/]+$/, '');
+    let outDir;
+    try {
+      const dlg = await fetch('/api/dialog/directory');
+      if (!dlg.ok) return;
+      const d = await dlg.json();
+      outDir = d.directory;
+    } catch { return; }
+    if (!outDir) { showResult('split-result', 'No folder selected.', 'error'); return; }
+
+    const body = {
+      file_path: _splitDesktopFile,
+      output_dir: outDir,
+      ranges: ranges,
+      output_type: outputType,
+      dpi: dpi,
+      confirmed: false,
+    };
+
     try {
       spin('split-spinner', true);
-      const res = await fetch('/api/pdf/split-by-path', { method: 'POST', body: fd });
-      if (!res.ok) { showResult('split-result', await res.text(), 'error'); return; }
-      downloadBlob(await res.blob(), 'split.zip');
-      showResult('split-result', '✓ Split successful – download started.', 'success');
+      const res = await fetch('/api/pdf/split-to-folder', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { showResult('split-result', data.detail || JSON.stringify(data), 'error'); return; }
+
+      if (data.conflicts && data.conflicts.length > 0) {
+        /* Show overwrite warning */
+        _splitPendingBody = body;
+        document.getElementById('split-overwrite-list').textContent =
+          'The following files already exist:\n\n' + data.conflicts.join('\n');
+        document.getElementById('split-overwrite-card').style.display = '';
+        return;
+      }
+
+      showResult('split-result', `Split done – ${data.written.length} file(s) written to ${outDir}`, 'success');
     } finally { spin('split-spinner', false); }
     return;
   }
 
-  if (!input.files.length) { showResult('split-result', 'Please select a PDF file.', 'error'); return; }
-  fd.append('file', input.files[0]);
+  /* ── Browser / upload path: return ZIP ────────────────────────── */
+  if (!input.files.length && !_splitDesktopFile) {
+    showResult('split-result', 'Please select a PDF file.', 'error'); return;
+  }
+
+  const fd = new FormData();
+  fd.append('ranges', ranges);
+  fd.append('output_type', outputType);
+
+  if (_splitDesktopFile) {
+    fd.append('file_path', _splitDesktopFile);
+  } else {
+    fd.append('file', input.files[0]);
+  }
 
   try {
     spin('split-spinner', true);
-    const res = await fetch('/api/pdf/split', { method: 'POST', body: fd });
+    const endpoint = _splitDesktopFile ? '/api/pdf/split-by-path' : '/api/pdf/split';
+    const res = await fetch(endpoint, { method: 'POST', body: fd });
     if (!res.ok) { showResult('split-result', await res.text(), 'error'); return; }
     downloadBlob(await res.blob(), 'split.zip');
-    showResult('split-result', '✓ Split successful – download started.', 'success');
+    showResult('split-result', 'Split successful – download started.', 'success');
   } finally { spin('split-spinner', false); }
 }
 
-/* ── Dir Compare ──────────────────────────────────────────────────── */
+async function _splitConfirmOverwrite() {
+  if (!_splitPendingBody) return;
+  _splitPendingBody.confirmed = true;
+  document.getElementById('split-overwrite-card').style.display = 'none';
+
+  try {
+    spin('split-spinner', true);
+    const res = await fetch('/api/pdf/split-to-folder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_splitPendingBody),
+    });
+    const data = await res.json();
+    if (!res.ok) { showResult('split-result', data.detail || JSON.stringify(data), 'error'); return; }
+    showResult('split-result', `Split done – ${data.written.length} file(s) written.`, 'success');
+  } finally {
+    spin('split-spinner', false);
+    _splitPendingBody = null;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  DIR COMPARE                                                       */
+/* ═══════════════════════════════════════════════════════════════════ */
+
 let _compareResult = null;
 
 async function compareDirectories() {
   const source = document.getElementById('dir-source').value.trim();
   const target = document.getElementById('dir-target').value.trim();
-  if (!source || !target) { showResult('compare-result', 'Please enter both directories.', 'error'); return; }
+  if (!source || !target) { alert('Please enter both directories.'); return; }
+
+  /* Remember last-used directories */
+  localStorage.setItem('dir-compare-source', source);
+  localStorage.setItem('dir-compare-target', target);
 
   const fd = new FormData();
   fd.append('source', source);
   fd.append('target', target);
 
+  /* Clear previous sync results */
+  const syncResult = document.getElementById('sync-result');
+  if (syncResult) { syncResult.className = 'result-box'; syncResult.textContent = ''; syncResult.removeAttribute('style'); }
+
   try {
     spin('compare-spinner', true);
     const res = await fetch('/api/dir/compare', { method: 'POST', body: fd });
     const data = await res.json();
-    if (!res.ok) { showResult('compare-result', data.detail || JSON.stringify(data), 'error'); return; }
+    if (!res.ok) { alert(data.detail || JSON.stringify(data)); return; }
 
     _compareResult = data;
-    const lines = [
-      `Missing  (${data.missing.length}):  ${data.missing.join(', ') || '—'}`,
-      `Modified (${data.modified.length}): ${data.modified.join(', ') || '—'}`,
-      `Identical(${data.identical.length}):${data.identical.join(', ') || '—'}`,
-      `Extra    (${data.extra.length}):    ${data.extra.join(', ') || '—'}`,
-    ];
-    showResult('compare-result', lines.join('\n'), 'success');
-
-    // Populate sync list
     const syncable = [...data.missing, ...data.modified];
     const card = document.getElementById('sync-card');
     const list = document.getElementById('sync-file-list');
+
+    /* Build summary line shown in sync card header */
+    const summary = `${data.missing.length} missing · ${data.modified.length} modified · ${data.identical.length} identical · ${data.extra.length} extra`;
+    let summaryEl = document.getElementById('compare-summary');
+    if (!summaryEl) {
+      summaryEl = document.createElement('div');
+      summaryEl.id = 'compare-summary';
+      summaryEl.style.cssText = 'font-size:.8rem;color:var(--clr-on-surface);margin-bottom:var(--sp-sm);';
+      card.insertBefore(summaryEl, card.firstChild);
+    }
+    summaryEl.textContent = summary;
+
     list.innerHTML = '';
     if (syncable.length) {
       syncable.forEach(f => {
         const isMissing = data.missing.includes(f);
         list.innerHTML += `<div class="check-item">
           <input type="checkbox" id="chk-${escId(f)}" value="${escHtml(f)}" checked />
-          <label for="chk-${escId(f)}">${escHtml(f)} <em style="font-size:.75rem;color:${isMissing ? 'var(--clr-error)' : '#ffb300'}">${isMissing ? 'missing' : 'modified'}</em></label>
+          <label for="chk-${escId(f)}">${escHtml(f)} <em style="font-size:.75rem;color:${isMissing ? 'var(--clr-error)' : 'var(--clr-warn)'}">${isMissing ? 'missing' : 'modified'}</em></label>
         </div>`;
       });
       card.style.display = '';
     } else {
-      card.style.display = 'none';
+      list.innerHTML = '<div style="padding:var(--sp-sm);color:var(--clr-on-surface);font-size:.85rem;">All files are identical. Nothing to sync.</div>';
+      card.style.display = '';
     }
   } finally { spin('compare-spinner', false); }
 }
@@ -715,25 +1083,46 @@ async function syncDirectories() {
     const res = await fetch('/api/dir/sync', { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) { showResult('sync-result', data.detail || JSON.stringify(data), 'error'); return; }
-    showResult('sync-result', `✓ Copied ${data.copied.length} file(s):\n${data.copied.join('\n')}`, 'success');
+    showResult('sync-result', `Copied ${data.copied.length} file(s):\n${data.copied.join('\n')}`, 'success');
   } finally { spin('sync-spinner', false); }
 }
 
-/* ── Utilities ────────────────────────────────────────────────────── */
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+/* ── Native dialog helpers (pywebview) ─────────────────────────────── */
+async function openFileDialog(target) {
+  try {
+    const res = await fetch('/api/dialog/files?multiple=true');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.files || data.files.length === 0) return;
+    if (target === 'merge') {
+      _mergeDesktopFiles.push(...data.files);
+      renderMergeList();
+    } else if (target === 'split') {
+      _splitDesktopFile = data.files[0];
+      document.getElementById('split-file-display').value = data.files[0].split(/[\\/]/).pop();
+    }
+  } catch (_) { /* not in desktop mode */ }
 }
 
-function escHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+async function openDirDialog(which) {
+  try {
+    const res = await fetch('/api/dialog/directory');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.directory) return;
+    const id = which === 'source' ? 'dir-source' : 'dir-target';
+    document.getElementById(id).value = data.directory;
+    localStorage.setItem('dir-compare-' + which, data.directory);
+  } catch (_) { /* ignore */ }
 }
 
-function escId(str) {
-  return String(str).replace(/[^a-zA-Z0-9_-]/g, '_');
-}
+/* ── Restore remembered directory compare inputs ──────────────────── */
+(function restoreDirCompare() {
+  const s = localStorage.getItem('dir-compare-source');
+  const t = localStorage.getItem('dir-compare-target');
+  if (s) document.getElementById('dir-source').value = s;
+  if (t) document.getElementById('dir-target').value = t;
+})();
 </script>
 </body>
 </html>
