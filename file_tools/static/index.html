@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FileTools</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+  <style>
+    /* ── CSS Custom Properties – Dark Material Design ────────────────── */
+    :root {
+      --clr-bg:          #121212;
+      --clr-surface:     #1e1e1e;
+      --clr-surface2:    #2c2c2c;
+      --clr-primary:     #bb86fc;
+      --clr-primary-var: #3700b3;
+      --clr-secondary:   #03dac6;
+      --clr-error:       #cf6679;
+      --clr-on-bg:       #e1e1e1;
+      --clr-on-surface:  #e1e1e1;
+      --clr-on-primary:  #000000;
+      --clr-outline:     #555;
+      --elevation-1:     0 2px 4px rgba(0,0,0,.6);
+      --elevation-2:     0 4px 8px rgba(0,0,0,.7);
+      --radius:          8px;
+      --transition:      .2s ease;
+    }
+
+    /* ── Reset / Base ────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Roboto', sans-serif;
+      background: var(--clr-bg);
+      color: var(--clr-on-bg);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    a { color: var(--clr-secondary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Top App Bar (Header) ─────────────────────────────────────────── */
+    header.app-bar {
+      background: var(--clr-surface);
+      box-shadow: var(--elevation-2);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .app-bar__inner {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 24px;
+      height: 64px;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .app-bar__logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--clr-primary);
+      letter-spacing: .04em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .app-bar__spacer { flex: 1; }
+    .app-bar__nav { display: flex; gap: 4px; }
+    .app-bar__nav a {
+      color: var(--clr-on-surface);
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-size: .9rem;
+      font-weight: 500;
+      transition: background var(--transition), color var(--transition);
+    }
+    .app-bar__nav a:hover,
+    .app-bar__nav a.active {
+      background: rgba(187,134,252,.15);
+      color: var(--clr-primary);
+      text-decoration: none;
+    }
+
+    /* ── Sub-Navbar (Tool Tabs) ──────────────────────────────────────── */
+    nav.sub-nav {
+      background: var(--clr-surface2);
+      border-bottom: 1px solid var(--clr-outline);
+    }
+    .sub-nav__inner {
+      display: flex;
+      gap: 0;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--clr-on-surface);
+      font-family: 'Roboto', sans-serif;
+      font-size: .875rem;
+      font-weight: 500;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 14px 20px;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: color var(--transition), border-color var(--transition);
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tab-btn:hover { color: var(--clr-primary); }
+    .tab-btn.active {
+      color: var(--clr-primary);
+      border-bottom-color: var(--clr-primary);
+    }
+
+    /* ── Main Content ────────────────────────────────────────────────── */
+    main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+    .tool-panel { display: none; }
+    .tool-panel.active { display: block; }
+
+    /* ── Card ────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--clr-surface);
+      border-radius: var(--radius);
+      box-shadow: var(--elevation-1);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .card__title {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--clr-primary);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── Form Controls ───────────────────────────────────────────────── */
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 500;
+      color: var(--clr-outline);
+      margin-bottom: 6px;
+      letter-spacing: .04em;
+    }
+    input[type="text"],
+    input[type="file"],
+    textarea {
+      width: 100%;
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      color: var(--clr-on-surface);
+      font-family: 'Roboto', sans-serif;
+      font-size: .95rem;
+      padding: 12px 16px;
+      transition: border-color var(--transition);
+      outline: none;
+    }
+    input[type="text"]:focus,
+    textarea:focus {
+      border-color: var(--clr-primary);
+    }
+    input[type="file"] {
+      cursor: pointer;
+      padding: 10px 12px;
+    }
+    input[type="file"]::file-selector-button {
+      background: var(--clr-primary);
+      color: var(--clr-on-primary);
+      border: none;
+      border-radius: 4px;
+      padding: 6px 14px;
+      font-family: 'Roboto', sans-serif;
+      font-size: .85rem;
+      font-weight: 500;
+      cursor: pointer;
+      margin-right: 12px;
+      transition: opacity var(--transition);
+    }
+    input[type="file"]::file-selector-button:hover { opacity: .85; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 24px;
+      border-radius: 20px;
+      border: none;
+      font-family: 'Roboto', sans-serif;
+      font-size: .875rem;
+      font-weight: 500;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity var(--transition), box-shadow var(--transition);
+    }
+    .btn-primary {
+      background: var(--clr-primary);
+      color: var(--clr-on-primary);
+      box-shadow: var(--elevation-1);
+    }
+    .btn-primary:hover { opacity: .9; box-shadow: var(--elevation-2); }
+    .btn-secondary {
+      background: var(--clr-secondary);
+      color: #000;
+    }
+    .btn-secondary:hover { opacity: .9; }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--clr-primary);
+      color: var(--clr-primary);
+    }
+    .btn-outline:hover { background: rgba(187,134,252,.1); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Result / Status ─────────────────────────────────────────────── */
+    .result-box {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      padding: 16px;
+      font-size: .875rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 360px;
+      overflow-y: auto;
+      display: none;
+    }
+    .result-box.show { display: block; }
+    .result-box.error { border-color: var(--clr-error); color: var(--clr-error); }
+    .result-box.success { border-color: var(--clr-secondary); }
+
+    /* ── Chip list ───────────────────────────────────────────────────── */
+    .chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .chip {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-outline);
+      border-radius: 16px;
+      padding: 4px 14px;
+      font-size: .8rem;
+      color: var(--clr-on-surface);
+    }
+    .chip.missing { border-color: var(--clr-error); color: var(--clr-error); }
+    .chip.modified { border-color: #ffb300; color: #ffb300; }
+    .chip.identical { border-color: var(--clr-secondary); color: var(--clr-secondary); }
+    .chip.extra { border-color: var(--clr-outline); }
+
+    /* ── Checkbox list ───────────────────────────────────────────────── */
+    .check-list { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+    .check-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+    .check-item input[type="checkbox"] { accent-color: var(--clr-primary); width: 16px; height: 16px; }
+    .check-item label { margin: 0; font-size: .85rem; color: var(--clr-on-surface); font-weight: 400; }
+
+    /* ── Spinner ─────────────────────────────────────────────────────── */
+    .spinner {
+      display: none;
+      width: 24px;
+      height: 24px;
+      border: 3px solid rgba(187,134,252,.3);
+      border-top-color: var(--clr-primary);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin-left: 12px;
+    }
+    .spinner.show { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Divider ─────────────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: var(--clr-outline);
+      margin: 20px 0;
+      opacity: .4;
+    }
+
+    /* ── Row ─────────────────────────────────────────────────────────── */
+    .row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+    .row > * { flex: 1; min-width: 200px; }
+    .row .btn { flex: none; }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    footer {
+      background: var(--clr-surface);
+      border-top: 1px solid var(--clr-outline);
+      padding: 20px 24px;
+      text-align: center;
+      font-size: .8rem;
+      color: var(--clr-outline);
+    }
+    footer span { color: var(--clr-secondary); }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 700px) {
+      .app-bar__nav { display: none; }
+      .app-bar__inner { padding: 0 16px; }
+      main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ HEADER ═══════════════════════════════ -->
+<header class="app-bar">
+  <div class="app-bar__inner">
+    <div class="app-bar__logo">
+      <span class="material-icons">folder_special</span>
+      FileTools
+    </div>
+    <div class="app-bar__spacer"></div>
+    <nav class="app-bar__nav">
+      <a href="#pdf-merge"  onclick="switchTab('pdf-merge',  this)">PDF Merge</a>
+      <a href="#pdf-split"  onclick="switchTab('pdf-split',  this)">PDF Split</a>
+      <a href="#dir-compare" onclick="switchTab('dir-compare', this)">Dir Compare</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ═══════════════════════════ SUB-NAVBAR ═══════════════════════════ -->
+<nav class="sub-nav" aria-label="Tool navigation">
+  <div class="sub-nav__inner">
+    <button class="tab-btn active" id="tab-pdf-merge"   onclick="switchTab('pdf-merge',   this)">
+      <span class="material-icons" style="font-size:18px">merge_type</span>PDF Merge
+    </button>
+    <button class="tab-btn" id="tab-pdf-split"   onclick="switchTab('pdf-split',   this)">
+      <span class="material-icons" style="font-size:18px">call_split</span>PDF Split
+    </button>
+    <button class="tab-btn" id="tab-dir-compare" onclick="switchTab('dir-compare', this)">
+      <span class="material-icons" style="font-size:18px">compare_arrows</span>Dir Compare
+    </button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════ MAIN ═════════════════════════════════ -->
+<main>
+
+  <!-- ─────────────────────── PDF MERGE ────────────────────────────── -->
+  <section class="tool-panel active" id="pdf-merge">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">merge_type</span> PDF Merge
+      </div>
+      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:20px;">
+        Select two or more PDF files to merge into a single document.
+      </p>
+
+      <div class="form-group">
+        <label for="merge-files">PDF Files (hold Ctrl/⌘ for multi-select)</label>
+        <div class="row">
+          <input type="file" id="merge-files" multiple accept=".pdf" />
+          <button class="btn btn-outline" id="merge-dialog-btn" onclick="openFileDialog('merge')" title="Pick files via native dialog (desktop only)" style="white-space:nowrap">
+            <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+          </button>
+        </div>
+      </div>
+
+      <div class="form-group" id="merge-file-list" style="display:none">
+        <label>Selected files</label>
+        <div class="chip-list" id="merge-chips"></div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <button class="btn btn-primary" onclick="mergePdfs()">
+          <span class="material-icons" style="font-size:18px">merge_type</span>Merge PDFs
+        </button>
+        <div class="spinner" id="merge-spinner"></div>
+      </div>
+
+      <div class="result-box" id="merge-result"></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── PDF SPLIT ────────────────────────────── -->
+  <section class="tool-panel" id="pdf-split">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">call_split</span> PDF Split
+      </div>
+      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:20px;">
+        Upload a PDF and specify page ranges to split it into separate files (returned as a ZIP archive).
+      </p>
+
+      <div class="row">
+        <div class="form-group" style="flex:2">
+          <label for="split-file">PDF File</label>
+          <div class="row">
+            <input type="file" id="split-file" accept=".pdf" />
+            <button class="btn btn-outline" onclick="openFileDialog('split')" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="split-ranges">Page Ranges <small style="color:var(--clr-outline)">(e.g. 1-3,4-6,7)</small></label>
+          <input type="text" id="split-ranges" placeholder="1-3,4-6,7" />
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <button class="btn btn-primary" onclick="splitPdf()">
+          <span class="material-icons" style="font-size:18px">call_split</span>Split PDF
+        </button>
+        <div class="spinner" id="split-spinner"></div>
+      </div>
+
+      <div class="result-box" id="split-result"></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── DIR COMPARE ──────────────────────────── -->
+  <section class="tool-panel" id="dir-compare">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">compare_arrows</span> Directory Compare
+      </div>
+      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:20px;">
+        Compare two directories using xxHash3-128 and optionally copy missing or modified files to the target.
+      </p>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="dir-source">Source Directory</label>
+          <div class="row">
+            <input type="text" id="dir-source" placeholder="/path/to/source" />
+            <button class="btn btn-outline" onclick="openDirDialog('source')" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="dir-target">Target Directory</label>
+          <div class="row">
+            <input type="text" id="dir-target" placeholder="/path/to/target" />
+            <button class="btn btn-outline" onclick="openDirDialog('target')" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:18px">folder_open</span>Browse&hellip;
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <button class="btn btn-primary" onclick="compareDirectories()">
+          <span class="material-icons" style="font-size:18px">compare_arrows</span>Compare
+        </button>
+        <div class="spinner" id="compare-spinner"></div>
+      </div>
+
+      <div class="result-box" id="compare-result"></div>
+    </div>
+
+    <!-- Sync sub-card (shown after compare) -->
+    <div class="card" id="sync-card" style="display:none">
+      <div class="card__title">
+        <span class="material-icons">sync</span> Sync – Copy to Target
+      </div>
+      <p style="font-size:.875rem;color:var(--clr-outline);margin-bottom:16px;">
+        Select which missing/modified files to copy from source to target.
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-outline" style="padding:6px 14px;font-size:.8rem" onclick="selectAll(true)">Select All</button>
+        <button class="btn btn-outline" style="padding:6px 14px;font-size:.8rem" onclick="selectAll(false)">Deselect All</button>
+      </div>
+      <div class="check-list" id="sync-file-list"></div>
+      <div class="divider"></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn btn-secondary" onclick="syncDirectories()">
+          <span class="material-icons" style="font-size:18px">sync</span>Copy Selected Files
+        </button>
+        <div class="spinner" id="sync-spinner"></div>
+      </div>
+      <div class="result-box" id="sync-result"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══════════════════════════ FOOTER ═══════════════════════════════ -->
+<footer>
+  <span>FileTools</span> &mdash; PDF merge &amp; split &bull; Directory compare &bull;
+  Built with FastAPI &amp; pywebview &mdash; Dark Material Design &copy; 2024
+</footer>
+
+<!-- ═══════════════════════════ JAVASCRIPT ═══════════════════════════ -->
+<script>
+'use strict';
+
+/* ── Tab switching ─────────────────────────────────────────────────── */
+function switchTab(id, triggerEl) {
+  document.querySelectorAll('.tool-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.app-bar__nav a').forEach(a => a.classList.remove('active'));
+
+  const tabBtn = document.getElementById('tab-' + id);
+  if (tabBtn) tabBtn.classList.add('active');
+  if (triggerEl && triggerEl.tagName === 'A') triggerEl.classList.add('active');
+}
+
+/* ── Show result ───────────────────────────────────────────────────── */
+function showResult(id, text, type = '') {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'result-box show' + (type ? ' ' + type : '');
+}
+
+/* ── Spinner helper ────────────────────────────────────────────────── */
+function spin(id, on) {
+  const el = document.getElementById(id);
+  if (el) { el.classList.toggle('show', on); }
+}
+
+/* ── Native dialog helpers (pywebview) ─────────────────────────────── */
+async function openFileDialog(target) {
+  try {
+    const res = await fetch('/api/dialog/files?multiple=true');
+    if (!res.ok) {
+      // Not in desktop mode – silently ignore (user uses the file input)
+      return;
+    }
+    const data = await res.json();
+    if (!data.files || data.files.length === 0) return;
+    if (target === 'merge') {
+      _mergeDesktopFiles = data.files;
+      renderMergeChips(data.files);
+    } else if (target === 'split') {
+      _splitDesktopFile = data.files[0];
+      document.getElementById('split-file').placeholder = data.files[0];
+    }
+  } catch (_) { /* offline / CORS – ignore */ }
+}
+
+async function openDirDialog(which) {
+  try {
+    const res = await fetch('/api/dialog/directory');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.directory) return;
+    document.getElementById(which === 'source' ? 'dir-source' : 'dir-target').value = data.directory;
+  } catch (_) { /* ignore */ }
+}
+
+/* ── Merge PDF ────────────────────────────────────────────────────── */
+let _mergeDesktopFiles = [];
+
+document.getElementById('merge-files').addEventListener('change', function () {
+  _mergeDesktopFiles = [];
+  renderMergeChips(Array.from(this.files).map(f => f.name));
+});
+
+function renderMergeChips(names) {
+  const list = document.getElementById('merge-file-list');
+  const chips = document.getElementById('merge-chips');
+  chips.innerHTML = names.map(n => `<span class="chip">${escHtml(n)}</span>`).join('');
+  list.style.display = names.length ? '' : 'none';
+}
+
+async function mergePdfs() {
+  const input = document.getElementById('merge-files');
+  const fd = new FormData();
+
+  if (_mergeDesktopFiles.length >= 2) {
+    // desktop mode – send file paths as text (server reads them)
+    fd.append('file_paths', _mergeDesktopFiles.join('\n'));
+    try {
+      spin('merge-spinner', true);
+      const res = await fetch('/api/pdf/merge-by-path', { method: 'POST', body: fd });
+      if (!res.ok) { showResult('merge-result', await res.text(), 'error'); return; }
+      downloadBlob(await res.blob(), 'merged.pdf');
+      showResult('merge-result', '✓ Merge successful – download started.', 'success');
+    } finally { spin('merge-spinner', false); }
+    return;
+  }
+
+  if (input.files.length < 2) {
+    showResult('merge-result', 'Please select at least 2 PDF files.', 'error'); return;
+  }
+  for (const f of input.files) fd.append('files', f);
+
+  try {
+    spin('merge-spinner', true);
+    const res = await fetch('/api/pdf/merge', { method: 'POST', body: fd });
+    if (!res.ok) { showResult('merge-result', await res.text(), 'error'); return; }
+    downloadBlob(await res.blob(), 'merged.pdf');
+    showResult('merge-result', '✓ Merge successful – download started.', 'success');
+  } finally { spin('merge-spinner', false); }
+}
+
+/* ── Split PDF ────────────────────────────────────────────────────── */
+let _splitDesktopFile = '';
+
+async function splitPdf() {
+  const input   = document.getElementById('split-file');
+  const ranges  = document.getElementById('split-ranges').value.trim();
+  if (!ranges) { showResult('split-result', 'Please enter page ranges.', 'error'); return; }
+
+  const fd = new FormData();
+  fd.append('ranges', ranges);
+
+  if (_splitDesktopFile) {
+    fd.append('file_path', _splitDesktopFile);
+    try {
+      spin('split-spinner', true);
+      const res = await fetch('/api/pdf/split-by-path', { method: 'POST', body: fd });
+      if (!res.ok) { showResult('split-result', await res.text(), 'error'); return; }
+      downloadBlob(await res.blob(), 'split.zip');
+      showResult('split-result', '✓ Split successful – download started.', 'success');
+    } finally { spin('split-spinner', false); }
+    return;
+  }
+
+  if (!input.files.length) { showResult('split-result', 'Please select a PDF file.', 'error'); return; }
+  fd.append('file', input.files[0]);
+
+  try {
+    spin('split-spinner', true);
+    const res = await fetch('/api/pdf/split', { method: 'POST', body: fd });
+    if (!res.ok) { showResult('split-result', await res.text(), 'error'); return; }
+    downloadBlob(await res.blob(), 'split.zip');
+    showResult('split-result', '✓ Split successful – download started.', 'success');
+  } finally { spin('split-spinner', false); }
+}
+
+/* ── Dir Compare ──────────────────────────────────────────────────── */
+let _compareResult = null;
+
+async function compareDirectories() {
+  const source = document.getElementById('dir-source').value.trim();
+  const target = document.getElementById('dir-target').value.trim();
+  if (!source || !target) { showResult('compare-result', 'Please enter both directories.', 'error'); return; }
+
+  const fd = new FormData();
+  fd.append('source', source);
+  fd.append('target', target);
+
+  try {
+    spin('compare-spinner', true);
+    const res = await fetch('/api/dir/compare', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) { showResult('compare-result', data.detail || JSON.stringify(data), 'error'); return; }
+
+    _compareResult = data;
+    const lines = [
+      `Missing  (${data.missing.length}):  ${data.missing.join(', ') || '—'}`,
+      `Modified (${data.modified.length}): ${data.modified.join(', ') || '—'}`,
+      `Identical(${data.identical.length}):${data.identical.join(', ') || '—'}`,
+      `Extra    (${data.extra.length}):    ${data.extra.join(', ') || '—'}`,
+    ];
+    showResult('compare-result', lines.join('\n'), 'success');
+
+    // Populate sync list
+    const syncable = [...data.missing, ...data.modified];
+    const card = document.getElementById('sync-card');
+    const list = document.getElementById('sync-file-list');
+    list.innerHTML = '';
+    if (syncable.length) {
+      syncable.forEach(f => {
+        const isMissing = data.missing.includes(f);
+        list.innerHTML += `<div class="check-item">
+          <input type="checkbox" id="chk-${escId(f)}" value="${escHtml(f)}" checked />
+          <label for="chk-${escId(f)}">${escHtml(f)} <em style="font-size:.75rem;color:${isMissing ? 'var(--clr-error)' : '#ffb300'}">${isMissing ? 'missing' : 'modified'}</em></label>
+        </div>`;
+      });
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  } finally { spin('compare-spinner', false); }
+}
+
+function selectAll(checked) {
+  document.querySelectorAll('#sync-file-list input[type="checkbox"]').forEach(cb => cb.checked = checked);
+}
+
+async function syncDirectories() {
+  const source = document.getElementById('dir-source').value.trim();
+  const target = document.getElementById('dir-target').value.trim();
+  const checked = Array.from(document.querySelectorAll('#sync-file-list input[type="checkbox"]:checked')).map(cb => cb.value);
+  if (!checked.length) { showResult('sync-result', 'No files selected.', 'error'); return; }
+
+  const fd = new FormData();
+  fd.append('source', source);
+  fd.append('target', target);
+  fd.append('files', checked.join('\n'));
+
+  try {
+    spin('sync-spinner', true);
+    const res = await fetch('/api/dir/sync', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) { showResult('sync-result', data.detail || JSON.stringify(data), 'error'); return; }
+    showResult('sync-result', `✓ Copied ${data.copied.length} file(s):\n${data.copied.join('\n')}`, 'success');
+  } finally { spin('sync-spinner', false); }
+}
+
+/* ── Utilities ────────────────────────────────────────────────────── */
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escId(str) {
+  return String(str).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+</script>
+</body>
+</html>
