@@ -1,5 +1,17 @@
 # Agent Log
 
+## 2026-02-26 10:00 – Date Sorter feature, cancel buttons, splash screen fixes, v1.1.0
+
+- **Cancel button in progress dialogs**: Added a Cancel button to the progress modal overlay. Implemented `AbortController` pattern: `showProgress()` creates a new `AbortController`, `cancelProgress()` calls `.abort()`, `getAbortSignal()` passes the signal to `fetch()`. All action functions (`mergePdfs`, `splitPdf`, `_splitConfirmOverwrite`, `compareDirectories`, `syncDirectories`, `scanDedup`) now pass `signal: getAbortSignal()` and catch `AbortError` silently. Fixed `splitPdf` inconsistency where two code paths still used `spin()` instead of `showProgress()`.
+- **Splash screen fix**: Complete rework of `splash.py`. Added `WS_EX_LAYERED` + `SetLayeredWindowAttributes` for guaranteed rendering. Full `argtypes` for all Win32 ctypes functions (`CreateWindowExW`, `DefWindowProcW`, `BeginPaint`, `EndPaint`, `GetClientRect`, `DrawTextW`, `SelectObject`, `DeleteObject`, `SetBkMode`, `SetTextColor`) to fix `OverflowError: int too long to convert` on 64-bit Python. Removed `SetProcessDpiAwareness(1)` that caused WebView2 hang. Added icon display via `LoadImageW`/`DrawIconEx` (48×48 from `icon.ico`). Updated text to "FileTools initialization …", size to 400×170 for padding.
+- **Cross-platform guards**: Guarded `import ctypes.wintypes` with `if sys.platform == "win32"` in `splash.py`. Guarded `ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID` with platform check in `desktop.py`.
+- **Date Sorter feature**: New tool that sorts files into `YYYY/MM_Mon` sub-folders by creation date.
+  - `file_tools/tools/date_sorter.py`: `DateSorter` class with `_creation_time()` (prefers `st_birthtime`, falls back to `min(st_ctime, st_mtime)`), `_folder_name()` (returns e.g. `2025/05_May`), `preview()` (builds plan without moving), `execute()` (moves files per plan).
+  - `file_tools/main.py`: Two new endpoints — `POST /api/date-sort/preview` and `POST /api/date-sort/execute`.
+  - `file_tools/static/index.html`: New "Date Sorter" tab with directory browse, Preview button, preview table grouped by folder, and "Sort Files Now" confirm button with warning.
+  - `file_tools/tests/test_date_sorter.py`: 18 tests covering `_creation_time`, `_folder_name`, `preview`, and `execute` (empty dirs, missing files, sub-dirs skipped, progress callbacks, string paths).
+- **Version 1.1.0**: Bumped in `pyproject.toml`, `__init__.py`, `main.py`, `installer_builder.py`. Git commit, tag "1.1", pushed to remote.
+
 ## 2026-02-25 16:10 – Progress modal, backend error handling, SSE dedup scan
 
 - **Progress modal (UI freeze)**: Added a non-dismissible modal overlay (`#progress-modal`) that blocks UI interaction during any long-running operation. Shows a spinner, operation title, and progress text. All action functions (`mergePdfs`, `splitPdf`, `_splitConfirmOverwrite`, `compareDirectories`, `syncDirectories`, `scanDedup`) now call `showProgress(title, text)` before starting and `hideProgress()` in `finally`. The old inline `spin()` calls were replaced.

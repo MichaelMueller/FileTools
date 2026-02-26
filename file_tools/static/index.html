@@ -561,6 +561,9 @@
     <button class="tab-btn" id="tab-dedup" onclick="switchTab('dedup', this)">
       <span class="material-icons" style="font-size:16px">file_copy</span>Dedup
     </button>
+    <button class="tab-btn" id="tab-date-sorter" onclick="switchTab('date-sorter', this)">
+      <span class="material-icons" style="font-size:16px">date_range</span>Date Sorter
+    </button>
   </div>
 </nav>
 
@@ -819,6 +822,42 @@
 
     <!-- Duplicate groups (populated by JS) -->
     <div id="dedup-groups"></div>
+  </section>
+
+  <!-- ─────────────────────── DATE SORTER ──────────────────────────── -->
+  <section class="tool-panel" id="date-sorter">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">date_range</span> Date Sorter
+      </div>
+      <p class="card__desc">
+        Sort files from a directory into sub-folders organised by creation date:
+        <code style="color:var(--clr-primary)">YYYY/MM_Mon</code> (e.g.&nbsp;2025/05_May).
+        Preview the plan first, then confirm to move the files.
+      </p>
+
+      <div class="row">
+        <div class="form-group" style="flex:2">
+          <label for="ds-dir">Directory to sort</label>
+          <div class="row">
+            <input type="text" id="ds-dir" placeholder="/path/to/photos" />
+            <button class="btn btn-outline" onclick="openDateSortDirDialog()" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">folder_open</span>Browse
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="dateSortPreview()">
+          <span class="material-icons" style="font-size:16px">preview</span>Preview
+        </button>
+      </div>
+      <div class="result-box" id="ds-result"></div>
+    </div>
+
+    <!-- Preview table (populated by JS) -->
+    <div id="ds-preview"></div>
   </section>
 
 </main>
@@ -1754,6 +1793,170 @@ async function _dedupConfirmDelete() {
   } finally {
     _dedupPendingDelete = null;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  DATE SORTER                                                        */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+let _dateSortPlan = null; // cached plan from preview
+
+/* Restore last date-sort dir */
+(function restoreDateSortDir() {
+  const d = localStorage.getItem('ds-dir');
+  if (d) document.getElementById('ds-dir').value = d;
+})();
+
+async function openDateSortDirDialog() {
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    try {
+      const cur = document.getElementById('ds-dir').value.trim();
+      const qp = cur ? '?default_dir=' + encodeURIComponent(cur) : '';
+      const res = await fetch('/api/dialog/directory' + qp);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.directory) return;
+      document.getElementById('ds-dir').value = data.directory;
+      localStorage.setItem('ds-dir', data.directory);
+    } catch (_) { /* ignore */ }
+  } else {
+    let dirInput = document.getElementById('ds-dir-input');
+    if (!dirInput) {
+      dirInput = document.createElement('input');
+      dirInput.type = 'file';
+      dirInput.id = 'ds-dir-input';
+      dirInput.setAttribute('webkitdirectory', '');
+      dirInput.style.display = 'none';
+      dirInput.addEventListener('change', function () {
+        if (this.files.length) {
+          const rel = this.files[0].webkitRelativePath || '';
+          const dirName = rel.split('/')[0] || this.files[0].name;
+          document.getElementById('ds-dir').value = dirName;
+          localStorage.setItem('ds-dir', dirName);
+        }
+      });
+      document.body.appendChild(dirInput);
+    }
+    dirInput.click();
+  }
+}
+
+async function dateSortPreview() {
+  const dir = document.getElementById('ds-dir').value.trim();
+  if (!dir) { showResult('ds-result', 'Please enter a directory path.', 'error'); return; }
+  localStorage.setItem('ds-dir', dir);
+
+  _dateSortPlan = null;
+  document.getElementById('ds-preview').innerHTML = '';
+
+  try {
+    showProgress('Scanning Files…', 'Reading creation dates…');
+    const res = await fetch('/api/date-sort/preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ directory: dir }),
+      signal: getAbortSignal(),
+    });
+    if (!res.ok) { showResult('ds-result', await errorDetail(res), 'error'); return; }
+
+    const data = await res.json();
+    _dateSortPlan = data.plan;
+
+    if (!data.plan.length) {
+      showResult('ds-result', 'No files found in this directory.', 'success');
+      return;
+    }
+
+    showResult('ds-result',
+      data.total + ' file' + (data.total === 1 ? '' : 's') + ' will be sorted into date folders. Review below and confirm.',
+      'success');
+
+    renderDateSortPreview(data.plan);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    showResult('ds-result', 'Preview failed: ' + e, 'error');
+  } finally { hideProgress(); }
+}
+
+function renderDateSortPreview(plan) {
+  const container = document.getElementById('ds-preview');
+  container.innerHTML = '';
+
+  /* Group by target folder */
+  const groups = {};
+  for (const entry of plan) {
+    if (!groups[entry.folder]) groups[entry.folder] = [];
+    groups[entry.folder].push(entry);
+  }
+
+  const table = document.createElement('div');
+  table.className = 'card';
+  table.style.overflowX = 'auto';
+
+  let html = '<div class="card__title"><span class="material-icons">preview</span> Preview – File → Folder</div>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:.82rem;">';
+  html += '<thead><tr style="border-bottom:1px solid var(--clr-outline);color:var(--clr-muted);text-align:left;">'
+        + '<th style="padding:8px 12px;">File</th>'
+        + '<th style="padding:8px 12px;">→ Destination Folder</th>'
+        + '</tr></thead><tbody>';
+
+  const sortedFolders = Object.keys(groups).sort();
+  for (const folder of sortedFolders) {
+    for (const entry of groups[folder]) {
+      html += '<tr style="border-bottom:1px solid var(--clr-outline);">'
+            + '<td style="padding:6px 12px;color:var(--clr-on-surface);">' + _esc(entry.file) + '</td>'
+            + '<td style="padding:6px 12px;color:var(--clr-primary);">' + _esc(entry.folder) + '</td>'
+            + '</tr>';
+    }
+  }
+
+  html += '</tbody></table>';
+
+  /* Confirm button */
+  html += '<div style="margin-top:var(--sp-lg);display:flex;gap:var(--sp-sm);align-items:center;">'
+        + '<button class="btn btn-primary" onclick="dateSortExecute()">'
+        + '<span class="material-icons" style="font-size:16px">drive_file_move</span>Sort Files Now</button>'
+        + '<span style="font-size:.8rem;color:var(--clr-warn);">This will move the files!</span>'
+        + '</div>';
+
+  table.innerHTML = html;
+  container.appendChild(table);
+}
+
+/* Simple HTML escape */
+function _esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function dateSortExecute() {
+  if (!_dateSortPlan || !_dateSortPlan.length) {
+    showResult('ds-result', 'No plan available. Run Preview first.', 'error');
+    return;
+  }
+
+  try {
+    showProgress('Sorting Files…', 'Moving files into date folders…');
+    const res = await fetch('/api/date-sort/execute', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ plan: _dateSortPlan }),
+      signal: getAbortSignal(),
+    });
+    if (!res.ok) { showResult('ds-result', await errorDetail(res), 'error'); return; }
+
+    const data = await res.json();
+    _dateSortPlan = null;
+    document.getElementById('ds-preview').innerHTML = '';
+    showResult('ds-result',
+      'Done! ' + data.moved + ' file' + (data.moved === 1 ? '' : 's') + ' sorted into date folders.',
+      'success');
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    showResult('ds-result', 'Sort failed: ' + e, 'error');
+  } finally { hideProgress(); }
 }
 </script>
 </body>

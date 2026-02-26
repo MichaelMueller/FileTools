@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from file_tools.tools.dir_compare import compare_directories, sync_directories
 from file_tools.tools.dedup_scanner import DedupScanner
+from file_tools.tools.date_sorter import DateSorter
 from file_tools.tools.pdf_tools import (
     merge_pdfs,
     parse_page_ranges,
@@ -381,6 +382,50 @@ async def dedup_delete(body: dict) -> JSONResponse:
     except OSError as exc:
         raise HTTPException(status_code=422, detail=f"Delete failed: {exc}") from exc
     return JSONResponse(content={"deleted": path_str})
+
+
+# ---------------------------------------------------------------------------
+# Date Sorter
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/date-sort/preview")
+async def date_sort_preview(body: dict) -> JSONResponse:
+    """Preview how files would be sorted into year/month folders."""
+    directory = body.get("directory", "")
+    root = Path(directory)
+    if not root.is_dir():
+        raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
+
+    sorter = DateSorter()
+    try:
+        plan = sorter.preview(root)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Preview failed: {exc}") from exc
+
+    return JSONResponse(content={"plan": plan, "total": len(plan)})
+
+
+@app.post("/api/date-sort/execute")
+async def date_sort_execute(body: dict) -> JSONResponse:
+    """Execute a previously previewed date-sort plan (move files)."""
+    plan = body.get("plan", [])
+    if not plan:
+        raise HTTPException(status_code=422, detail="Empty plan – nothing to move.")
+
+    sorter = DateSorter()
+    try:
+        moved = sorter.execute(plan)
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Move failed: {exc}") from exc
+
+    return JSONResponse(content={"moved": len(moved), "details": moved})
 
 
 # ---------------------------------------------------------------------------
