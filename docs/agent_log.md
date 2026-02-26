@@ -1,5 +1,40 @@
 # Agent Log
 
+## 2026-02-26 18:15 – GPS Sorter v3: Replace Named Locations with auto-learned Region Aliases
+
+- **Core concept change**: Removed manual Named Locations CRUD (lat/lon/radius input). Replaced with auto-learned Region Aliases — when a user names a trip during execute, the system remembers the region (centroid + radius) under that alias and auto-matches future photos to it.
+- **Database model** (`gps_sorter.py`): `NamedLocationRow` → `RegionAliasRow` (table `gps_region_aliases`). Fields: id, alias, lat, lon, radius_km (default 5.0).
+- **Alias persistence**: New methods `get_aliases()`, `delete_alias()`, `_save_alias()` (upsert — updates nearby existing alias or creates new), `_alias_to_dict()`, `_match_alias()`. Removed `add_location()`, `get_locations()`, `update_location()`, `delete_location()`, `_loc_to_dict()`.
+- **Distance-based trip splitting**: `TRIP_SPLIT_KM = 50.0` — trips are now split when a photo is >50km from the current cluster centroid (not just consecutive distance). Tracks cluster centroid dynamically during grouping.
+- **Alias saving on execute**: When user provides `trip_names`, computes each trip's centroid + radius and calls `_save_alias()` with `ALIAS_BUFFER_KM = 5.0` buffer. Saved aliases auto-match on future previews.
+- **Trip metadata enriched**: Each trip now includes `centroid_lat`, `centroid_lon`, `radius_km` in preview response.
+- **API endpoints** (`main.py`): Replaced 4 location CRUD endpoints with `GET /api/gps-sort/aliases` and `DELETE /api/gps-sort/aliases`.
+- **Frontend** (`index.html`): Replaced Named Locations form (editable lat/lon/radius inputs, Add Location button) with read-only collapsible "Saved Region Aliases" section. Shows alias name, coordinates, radius, and delete button. Aliases reload after execute to show newly learned regions.
+- **Tests**: 66 tests in `test_gps_sorter.py` (was 61): `TestMatchAlias` (4), `TestAliasPersistence` (8 — empty, save_and_get, ordered, updates_nearby, creates_new_when_far, delete, delete_nonexistent, alias_to_dict), new preview tests (`test_distance_splits_trips`, `test_nearby_photos_stay_in_same_trip`, `test_trip_centroid_in_metadata`), new execute tests (`test_execute_saves_aliases`, `test_saved_alias_auto_matches_next_preview`, `test_execute_no_trip_names_no_alias_saved`). 10 GPS tests in `test_main.py`: 2 alias endpoint tests replace 6 location CRUD tests. All 76 tests passing.
+
+## 2026-02-26 17:30 – GPS Sorter v2: Trip detection, DB persistence, interactive naming
+
+- **Trip detection algorithm** (`file_tools/tools/gps_sorter.py`): Major refactor of GPS Sorter. Files are sorted chronologically (EXIF date via `DateSorter._creation_time`), classified against DB-backed named locations, and consecutive photos NOT at any named location are automatically grouped into "trips". Each trip receives a suggested name via batch offline reverse geocoding (most common city). Users can rename trips in the preview before executing.
+- **Database persistence** (SQLAlchemy): Named locations are now stored in a `gps_named_locations` table (id, name, lat, lon, radius_km) instead of browser localStorage. Uses the same `db_url` constructor pattern as DedupScanner (temp dir SQLite default). CRUD methods: `add_location()`, `get_locations()`, `update_location()`, `delete_location()`.
+- **Updated preview response**: Preview now returns `{plan, trips, total, no_gps_count}`. Each plan entry includes `group` ("location"/"trip"/"no_gps"), `trip_id`, and `location_name`. Each trip has `id`, `suggested_name`, `file_count`, `start_date`, `end_date`.
+- **Execute with trip renaming**: `execute()` accepts optional `trip_names` dict mapping trip_id → user-chosen folder name. Overrides suggested names for matching entries.
+- **New API endpoints**: `GET /api/gps-sort/locations` (list), `POST /api/gps-sort/locations` (add), `PUT /api/gps-sort/locations` (update), `DELETE /api/gps-sort/locations` (delete). Module-level `_gps_db_url` for DB URL configuration. Updated preview/execute endpoints for new response format and trip_names parameter.
+- **Frontend overhaul**: Named locations now loaded from API on tab activation (no more localStorage). Inline editing with auto-save via PUT. Add/Delete via API calls. New "Detected Trips" card in preview shows editable trip name inputs with file count and date range. Execute collects trip names from inputs and sends as `trip_names` dict. Preview table now shows Group column (Location/Trip/No GPS) with color coding.
+- **Tests**: 61 tests in `test_gps_sorter.py` (was 43): added `TestFileTimestamp` (2), `TestLocationCRUD` (9), plus trip detection tests (`test_trip_detection_creates_trips`, `test_multiple_trips_separated_by_home`, `test_trip_date_range`, `test_trip_suggested_name_most_common`, `test_no_gps_count`, `test_no_timestamp_in_plan_entries`, `test_trip_names_override`, `test_trip_names_partial_override`). Updated all preview/execute tests for new `dict` return format. 14 GPS tests in `test_main.py` (was 7): added location CRUD endpoint tests (6), `test_gps_sort_execute_with_trip_names`. All tests passing.
+
+## 2026-02-26 16:00 – GPS Sorter feature
+
+- **New tool: GPS Sorter** (`file_tools/tools/gps_sorter.py`): Sorts photos into location-based subdirectories using GPS coordinates from EXIF metadata. Workflow mirrors Date Sorter: preview → confirm → move files. Features:
+  - **GPS extraction**: Reads GPSLatitude/GPSLongitude from EXIF IFD via Pillow.
+  - **Named locations**: Users define places (name, lat, lon, radius_km). Photos within radius are sorted into that folder.
+  - **Reverse geocoding**: Unmatched GPS photos are batch-geocoded to `CC/City` folders using offline `reverse_geocoder` library.
+  - **No GPS fallback**: Files without GPS EXIF go into `No GPS/` folder.
+  - **Haversine distance**: Great-circle distance calculation for location matching.
+- **API endpoints**: Added `POST /api/gps-sort/preview` and `POST /api/gps-sort/execute` in `main.py`.
+- **Frontend**: New "GPS Sorter" tab in `index.html` with directory browser, named locations manager (add/remove/edit with localStorage persistence), preview table showing file→location→folder mappings, and execute button.
+- **Dependencies**: Added `reverse_geocoder>=1.5.0` to `pyproject.toml`.
+- **Tests**: Created `file_tools/tests/test_gps_sorter.py` with comprehensive tests for all methods: `_dms_to_decimal`, `_haversine_km`, `_gps_coordinates`, `_match_named_location`, `_reverse_geocode`, `_sanitise_folder`, `preview`, `execute`. Added GPS sort endpoint tests to `test_main.py`.
+
 ## 2026-02-26 15:30 – README with screenshots, v1.2.0 release
 
 - **README.md**: Complete rewrite with project description, feature overview with screenshots, installation/usage instructions, technology stack table, development guide (project structure, coding conventions, running tests, building installer), privacy section, and author info linking to michaelmuelleronline.de. Notes AI-assisted creation.

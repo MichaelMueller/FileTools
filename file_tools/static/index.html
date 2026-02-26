@@ -613,6 +613,9 @@
     <button class="tab-btn" id="tab-date-sorter" onclick="switchTab('date-sorter', this)">
       <span class="material-icons" style="font-size:16px">date_range</span>Date Sorter
     </button>
+    <button class="tab-btn" id="tab-gps-sorter" onclick="switchTab('gps-sorter', this)">
+      <span class="material-icons" style="font-size:16px">location_on</span>GPS Sorter
+    </button>
   </div>
 </nav>
 
@@ -907,6 +910,56 @@
 
     <!-- Preview table (populated by JS) -->
     <div id="ds-preview"></div>
+  </section>
+
+  <!-- ─────────────────────── GPS SORTER ──────────────────────────── -->
+  <section class="tool-panel" id="gps-sorter">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">location_on</span> GPS Sorter
+      </div>
+      <p class="card__desc">
+        Sort photos into sub-folders based on GPS coordinates.
+        Photos are automatically grouped into <strong>trips</strong> by geographic proximity.
+        Name each trip before sorting &mdash; your names are saved as
+        <strong>region aliases</strong> and reused automatically next time.
+        Photos without GPS go into <code style="color:var(--clr-primary)">No GPS</code>.
+      </p>
+
+      <div class="row">
+        <div class="form-group" style="flex:2">
+          <label for="gps-dir">Directory to sort</label>
+          <div class="row">
+            <input type="text" id="gps-dir" placeholder="/path/to/photos" />
+            <button class="btn btn-outline" onclick="openGpsSortDirDialog()" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">folder_open</span>Browse
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Saved Region Aliases (read-only, loaded from DB) -->
+      <details id="gps-aliases-details" style="margin-top:var(--sp-sm);">
+        <summary style="font-size:.85rem;cursor:pointer;color:var(--clr-muted);user-select:none;">
+          <span class="material-icons" style="font-size:16px;vertical-align:text-bottom;">bookmark</span>
+          Saved Region Aliases
+        </summary>
+        <div id="gps-aliases-list" style="margin-top:var(--sp-xs);"></div>
+      </details>
+
+      <div class="action-row" style="margin-top:var(--sp-lg)">
+        <button class="btn btn-primary" onclick="gpsSortPreview()">
+          <span class="material-icons" style="font-size:16px">preview</span>Preview
+        </button>
+      </div>
+      <div class="result-box" id="gps-result"></div>
+    </div>
+
+    <!-- Detected trips (populated by JS after preview) -->
+    <div id="gps-trips-section"></div>
+
+    <!-- Preview table (populated by JS) -->
+    <div id="gps-preview"></div>
   </section>
 
 </main>
@@ -2003,6 +2056,280 @@ async function dateSortExecute() {
   } catch (e) {
     if (e.name === 'AbortError') return;
     showResult('ds-result', 'Sort failed: ' + e, 'error');
+  } finally { hideProgress(); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  GPS SORTER                                                        */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+let _gpsSortPlan = null;
+let _gpsSortTrips = [];
+let _gpsAliasesLoaded = false;
+
+/* Restore last directory */
+(function restoreGpsSorter() {
+  const d = localStorage.getItem('gps-dir');
+  if (d) document.getElementById('gps-dir').value = d;
+})();
+
+/* ─── Saved region aliases (read-only display) ───────────────────── */
+
+async function loadGpsAliases() {
+  try {
+    const res = await fetch('/api/gps-sort/aliases');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderGpsAliases(data.aliases || []);
+  } catch (_) { /* ignore */ }
+  _gpsAliasesLoaded = true;
+}
+
+function renderGpsAliases(aliases) {
+  const container = document.getElementById('gps-aliases-list');
+  if (!aliases.length) {
+    container.innerHTML = '<div style="font-size:.8rem;color:var(--clr-muted);padding:var(--sp-xs) 0;">No saved aliases yet. Name a trip during preview to create one.</div>';
+    return;
+  }
+  container.innerHTML = aliases.map(a =>
+    `<div style="display:flex;gap:var(--sp-sm);align-items:center;margin-bottom:var(--sp-xs);font-size:.82rem;flex-wrap:wrap;">
+      <span class="material-icons" style="font-size:16px;color:var(--clr-primary)">bookmark</span>
+      <span style="flex:1;min-width:120px;color:var(--clr-on-surface);font-weight:500;">${escHtml(a.alias)}</span>
+      <span style="color:var(--clr-muted);font-size:.75rem;white-space:nowrap;">${a.lat.toFixed(3)}°, ${a.lon.toFixed(3)}° · ${a.radius_km.toFixed(1)} km</span>
+      <button class="btn btn-outline btn-sm" onclick="gpsDeleteAlias(${a.id})" title="Remove alias">
+        <span class="material-icons" style="font-size:14px;color:var(--clr-error)">close</span>
+      </button>
+    </div>`
+  ).join('');
+}
+
+async function gpsDeleteAlias(id) {
+  try {
+    await fetch('/api/gps-sort/aliases', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id}),
+    });
+    await loadGpsAliases();
+  } catch (_) { /* ignore */ }
+}
+
+/* Load aliases once on first GPS tab activation */
+(function _watchGpsTab() {
+  const obs = new MutationObserver(() => {
+    const panel = document.getElementById('gps-sorter');
+    if (panel && panel.style.display !== 'none' && !_gpsAliasesLoaded) {
+      loadGpsAliases();
+    }
+  });
+  const main = document.querySelector('main');
+  if (main) obs.observe(main, {childList: true, subtree: true, attributes: true, attributeFilter:['style']});
+  setTimeout(() => { if (!_gpsAliasesLoaded) loadGpsAliases(); }, 200);
+})();
+
+/* ─── Directory dialog ───────────────────────────────────────────── */
+
+async function openGpsSortDirDialog() {
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    try {
+      const cur = document.getElementById('gps-dir').value.trim();
+      const qp = cur ? '?default_dir=' + encodeURIComponent(cur) : '';
+      const res = await fetch('/api/dialog/directory' + qp);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.directory) return;
+      document.getElementById('gps-dir').value = data.directory;
+      localStorage.setItem('gps-dir', data.directory);
+    } catch (_) { /* ignore */ }
+  } else {
+    let dirInput = document.getElementById('gps-dir-input');
+    if (!dirInput) {
+      dirInput = document.createElement('input');
+      dirInput.type = 'file';
+      dirInput.id = 'gps-dir-input';
+      dirInput.setAttribute('webkitdirectory', '');
+      dirInput.style.display = 'none';
+      dirInput.addEventListener('change', function () {
+        if (this.files.length) {
+          const rel = this.files[0].webkitRelativePath || '';
+          const dirName = rel.split('/')[0] || this.files[0].name;
+          document.getElementById('gps-dir').value = dirName;
+          localStorage.setItem('gps-dir', dirName);
+        }
+      });
+      document.body.appendChild(dirInput);
+    }
+    dirInput.click();
+  }
+}
+
+/* ─── Preview with trip detection ────────────────────────────────── */
+
+async function gpsSortPreview() {
+  const dir = document.getElementById('gps-dir').value.trim();
+  if (!dir) { showResult('gps-result', 'Please enter a directory path.', 'error'); return; }
+  localStorage.setItem('gps-dir', dir);
+
+  _gpsSortPlan = null;
+  _gpsSortTrips = [];
+  document.getElementById('gps-trips-section').innerHTML = '';
+  document.getElementById('gps-preview').innerHTML = '';
+
+  try {
+    showProgress('Scanning GPS Data…', 'Reading EXIF coordinates and timestamps…');
+    const res = await fetch('/api/gps-sort/preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ directory: dir }),
+      signal: getAbortSignal(),
+    });
+    if (!res.ok) { showResult('gps-result', await errorDetail(res), 'error'); return; }
+
+    const data = await res.json();
+    _gpsSortPlan = data.plan;
+    _gpsSortTrips = data.trips || [];
+
+    if (!data.plan.length) {
+      showResult('gps-result', 'No files found in this directory.', 'success');
+      return;
+    }
+
+    const gpsCount = data.total - data.no_gps_count;
+    const tripInfo = _gpsSortTrips.length ? ` ${_gpsSortTrips.length} trip(s) detected.` : '';
+    showResult('gps-result',
+      `${data.total} file(s) found: ${gpsCount} with GPS, ${data.no_gps_count} without.${tripInfo} Review below and confirm.`,
+      'success');
+
+    renderGpsSortTrips();
+    renderGpsSortPreview(data.plan);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    showResult('gps-result', 'Preview failed: ' + e, 'error');
+  } finally { hideProgress(); }
+}
+
+/* ─── Render detected trips with editable names ──────────────────── */
+
+function renderGpsSortTrips() {
+  const container = document.getElementById('gps-trips-section');
+  if (!_gpsSortTrips.length) { container.innerHTML = ''; return; }
+
+  let html = '<div class="card">';
+  html += '<div class="card__title"><span class="material-icons">explore</span> Detected Trips</div>';
+  html += '<p style="font-size:.8rem;color:var(--clr-muted);margin-bottom:var(--sp-sm);">'
+        + 'Name each trip below. The folder will use the name you provide.</p>';
+
+  for (const trip of _gpsSortTrips) {
+    const dateRange = trip.start_date === trip.end_date
+      ? trip.start_date
+      : `${trip.start_date} – ${trip.end_date}`;
+    html += `<div style="display:flex;gap:var(--sp-sm);align-items:center;margin-bottom:var(--sp-sm);flex-wrap:wrap;">
+      <span class="material-icons" style="font-size:18px;color:var(--clr-primary)">flight</span>
+      <input type="text" id="trip-name-${trip.id}" value="${escHtml(trip.suggested_name)}"
+             style="flex:1;min-width:160px;" />
+      <span style="font-size:.8rem;color:var(--clr-muted);white-space:nowrap;">${trip.file_count} file(s) · ${dateRange}</span>
+    </div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+/* ─── Render preview table ───────────────────────────────────────── */
+
+function renderGpsSortPreview(plan) {
+  const container = document.getElementById('gps-preview');
+  container.innerHTML = '';
+
+  /* Group by target folder */
+  const groups = {};
+  for (const entry of plan) {
+    if (!groups[entry.folder]) groups[entry.folder] = [];
+    groups[entry.folder].push(entry);
+  }
+
+  const table = document.createElement('div');
+  table.className = 'card';
+  table.style.overflowX = 'auto';
+
+  let html = '<div class="card__title"><span class="material-icons">preview</span> Preview – File → Location Folder</div>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:.82rem;">';
+  html += '<thead><tr style="border-bottom:1px solid var(--clr-outline);color:var(--clr-muted);text-align:left;">'
+        + '<th style="padding:8px 12px;">File</th>'
+        + '<th style="padding:8px 12px;">Location</th>'
+        + '<th style="padding:8px 12px;">Group</th>'
+        + '<th style="padding:8px 12px;">→ Folder</th>'
+        + '</tr></thead><tbody>';
+
+  const sortedFolders = Object.keys(groups).sort();
+  for (const folder of sortedFolders) {
+    for (const entry of groups[folder]) {
+      const coords = (entry.lat !== null && entry.lon !== null)
+        ? `${entry.lat.toFixed(4)}°, ${entry.lon.toFixed(4)}°`
+        : '—';
+      const groupLabel = entry.group === 'trip' ? '<span style="color:var(--clr-warn)">Trip</span>'
+        : entry.group === 'location' ? '<span style="color:var(--clr-secondary)">Location</span>'
+        : '<span style="color:var(--clr-muted)">No GPS</span>';
+      html += '<tr style="border-bottom:1px solid var(--clr-outline);">'
+            + '<td style="padding:6px 12px;color:var(--clr-on-surface);">' + _esc(entry.file) + '</td>'
+            + '<td style="padding:6px 12px;color:var(--clr-muted);">' + coords + '</td>'
+            + '<td style="padding:6px 12px;">' + groupLabel + '</td>'
+            + '<td style="padding:6px 12px;color:var(--clr-primary);">' + _esc(entry.folder) + '</td>'
+            + '</tr>';
+    }
+  }
+
+  html += '</tbody></table>';
+
+  /* Confirm button */
+  html += '<div style="margin-top:var(--sp-lg);display:flex;gap:var(--sp-sm);align-items:center;">'
+        + '<button class="btn btn-primary" onclick="gpsSortExecute()">'
+        + '<span class="material-icons" style="font-size:16px">drive_file_move</span>Sort Files Now</button>'
+        + '<span style="font-size:.8rem;color:var(--clr-warn);">This will move the files!</span>'
+        + '</div>';
+
+  table.innerHTML = html;
+  container.appendChild(table);
+}
+
+/* ─── Execute with trip names ────────────────────────────────────── */
+
+async function gpsSortExecute() {
+  if (!_gpsSortPlan || !_gpsSortPlan.length) {
+    showResult('gps-result', 'No plan available. Run Preview first.', 'error');
+    return;
+  }
+
+  /* Collect user-provided trip names */
+  const trip_names = {};
+  for (const trip of _gpsSortTrips) {
+    const input = document.getElementById('trip-name-' + trip.id);
+    if (input) trip_names[String(trip.id)] = input.value.trim() || trip.suggested_name;
+  }
+
+  try {
+    showProgress('Sorting Files…', 'Moving files into location folders…');
+    const res = await fetch('/api/gps-sort/execute', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ plan: _gpsSortPlan, trip_names }),
+      signal: getAbortSignal(),
+    });
+    if (!res.ok) { showResult('gps-result', await errorDetail(res), 'error'); return; }
+
+    const data = await res.json();
+    _gpsSortPlan = null;
+    _gpsSortTrips = [];
+    document.getElementById('gps-trips-section').innerHTML = '';
+    document.getElementById('gps-preview').innerHTML = '';
+    showResult('gps-result',
+      'Done! ' + data.moved + ' file' + (data.moved === 1 ? '' : 's') + ' sorted into location folders.',
+      'success');
+    /* Reload aliases – execute may have saved new ones */
+    loadGpsAliases();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    showResult('gps-result', 'Sort failed: ' + e, 'error');
   } finally { hideProgress(); }
 }
 </script>

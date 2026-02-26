@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from file_tools.tools.dir_compare import compare_directories, sync_directories
 from file_tools.tools.dedup_scanner import DedupScanner
 from file_tools.tools.date_sorter import DateSorter
+from file_tools.tools.gps_sorter import GpsSorter
 from file_tools.tools.pdf_tools import (
     merge_pdfs,
     parse_page_ranges,
@@ -423,6 +424,69 @@ async def date_sort_execute(body: dict) -> JSONResponse:
     sorter = DateSorter()
     try:
         moved = sorter.execute(plan)
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Move failed: {exc}") from exc
+
+    return JSONResponse(content={"moved": len(moved), "details": moved})
+
+
+# ---------------------------------------------------------------------------
+# GPS Sorter
+# ---------------------------------------------------------------------------
+
+_gps_db_url: str | None = None  # let GpsSorter use its default (temp dir)
+
+
+@app.get("/api/gps-sort/aliases")
+async def gps_sort_aliases_list() -> JSONResponse:
+    """Return all persisted region aliases."""
+    sorter = GpsSorter(db_url=_gps_db_url)
+    return JSONResponse(content={"aliases": sorter.get_aliases()})
+
+
+@app.delete("/api/gps-sort/aliases")
+async def gps_sort_aliases_delete(body: dict) -> JSONResponse:
+    """Delete a region alias by id."""
+    sorter = GpsSorter(db_url=_gps_db_url)
+    sorter.delete_alias(body.get("id", 0))
+    return JSONResponse(content={"deleted": True})
+
+
+@app.post("/api/gps-sort/preview")
+async def gps_sort_preview(body: dict) -> JSONResponse:
+    """Preview how files would be sorted into location-based folders."""
+    directory = body.get("directory", "")
+    root = Path(directory)
+    if not root.is_dir():
+        raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
+
+    sorter = GpsSorter(db_url=_gps_db_url)
+    try:
+        result = sorter.preview(root)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Preview failed: {exc}") from exc
+
+    return JSONResponse(content=result)
+
+
+@app.post("/api/gps-sort/execute")
+async def gps_sort_execute(body: dict) -> JSONResponse:
+    """Execute a previously previewed GPS-sort plan (move files)."""
+    plan = body.get("plan", [])
+    if not plan:
+        raise HTTPException(status_code=422, detail="Empty plan \u2013 nothing to move.")
+
+    trip_names = body.get("trip_names", {})
+
+    sorter = GpsSorter(db_url=_gps_db_url)
+    try:
+        moved = sorter.execute(plan, trip_names=trip_names)
     except PermissionError as exc:
         raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
     except OSError as exc:

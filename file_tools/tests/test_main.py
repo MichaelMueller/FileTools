@@ -580,6 +580,172 @@ def test_set_webview_window_updates_module() -> None:
 
 
 # ---------------------------------------------------------------------------
+# GPS Sort
+# ---------------------------------------------------------------------------
+
+
+def test_gps_sort_aliases_list(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.get_aliases.return_value = [
+            {"id": 1, "alias": "Home", "lat": 48.0, "lon": 11.0, "radius_km": 5.0},
+        ]
+        r = client.get("/api/gps-sort/aliases")
+    assert r.status_code == 200
+    assert len(r.json()["aliases"]) == 1
+
+
+def test_gps_sort_aliases_delete(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.delete_alias.return_value = None
+        r = client.request(
+            "DELETE",
+            "/api/gps-sort/aliases",
+            json={"id": 1},
+        )
+    assert r.status_code == 200
+    assert r.json()["deleted"] is True
+
+
+def test_gps_sort_preview_success(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "gps_photos"
+    root.mkdir()
+    (root / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+
+    fake_result = {
+        "plan": [
+            {
+                "file": "a.jpg",
+                "source": str(root / "a.jpg"),
+                "folder": "No GPS",
+                "destination": str(root / "No GPS" / "a.jpg"),
+                "lat": None,
+                "lon": None,
+                "location_name": "No GPS",
+                "group": "no_gps",
+                "trip_id": None,
+            }
+        ],
+        "trips": [],
+        "total": 1,
+        "no_gps_count": 1,
+    }
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.preview.return_value = fake_result
+        r = client.post(
+            "/api/gps-sort/preview",
+            json={"directory": str(root)},
+        )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert data["no_gps_count"] == 1
+    assert len(data["trips"]) == 0
+
+
+def test_gps_sort_preview_not_a_directory(client: TestClient) -> None:
+    r = client.post(
+        "/api/gps-sort/preview",
+        json={"directory": "/nonexistent/path"},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_preview_permission_error(
+    client: TestClient, tmp_path: Path
+) -> None:
+    root = tmp_path / "locked"
+    root.mkdir()
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.preview.side_effect = PermissionError("denied")
+        r = client.post(
+            "/api/gps-sort/preview",
+            json={"directory": str(root)},
+        )
+    assert r.status_code == 422
+    assert "permission" in r.json()["detail"].lower()
+
+
+def test_gps_sort_execute_success(client: TestClient, tmp_path: Path) -> None:
+    plan = [
+        {
+            "file": "a.jpg",
+            "source": str(tmp_path / "a.jpg"),
+            "folder": "No GPS",
+            "destination": str(tmp_path / "No GPS" / "a.jpg"),
+            "group": "no_gps",
+            "trip_id": None,
+        }
+    ]
+    moved_result = [plan[0]]
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.execute.return_value = moved_result
+        r = client.post(
+            "/api/gps-sort/execute",
+            json={"plan": plan},
+        )
+    assert r.status_code == 200
+    assert r.json()["moved"] == 1
+
+
+def test_gps_sort_execute_with_trip_names(client: TestClient, tmp_path: Path) -> None:
+    plan = [
+        {
+            "file": "a.jpg",
+            "source": str(tmp_path / "a.jpg"),
+            "folder": "AE/Dubai",
+            "destination": str(tmp_path / "AE/Dubai" / "a.jpg"),
+            "group": "trip",
+            "trip_id": 1,
+        }
+    ]
+    moved_result = [dict(plan[0], folder="Dubai Holiday")]
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.execute.return_value = moved_result
+        r = client.post(
+            "/api/gps-sort/execute",
+            json={"plan": plan, "trip_names": {"1": "Dubai Holiday"}},
+        )
+    assert r.status_code == 200
+    assert r.json()["moved"] == 1
+    # Verify trip_names was passed through
+    MockSorter.return_value.execute.assert_called_once()
+    call_kwargs = MockSorter.return_value.execute.call_args
+    assert call_kwargs[1]["trip_names"] == {"1": "Dubai Holiday"}
+
+
+def test_gps_sort_execute_empty_plan(client: TestClient) -> None:
+    r = client.post(
+        "/api/gps-sort/execute",
+        json={"plan": []},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_execute_permission_error(client: TestClient) -> None:
+    plan = [{"file": "x.jpg", "source": "/tmp/x.jpg", "folder": "No GPS", "destination": "/tmp/No GPS/x.jpg"}]
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.execute.side_effect = PermissionError("denied")
+        r = client.post(
+            "/api/gps-sort/execute",
+            json={"plan": plan},
+        )
+    assert r.status_code == 422
+    assert "permission" in r.json()["detail"].lower()
+
+
+def test_gps_sort_execute_os_error(client: TestClient) -> None:
+    plan = [{"file": "x.jpg", "source": "/tmp/x.jpg", "folder": "No GPS", "destination": "/tmp/No GPS/x.jpg"}]
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.execute.side_effect = OSError("disk full")
+        r = client.post(
+            "/api/gps-sort/execute",
+            json={"plan": plan},
+        )
+    assert r.status_code == 422
+    assert "move failed" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
 # run_web
 # ---------------------------------------------------------------------------
 
