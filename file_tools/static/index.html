@@ -829,6 +829,7 @@
     <div class="progress-spinner"></div>
     <div class="progress-title" id="progress-title">Processing…</div>
     <div class="progress-text" id="progress-text"></div>
+    <button class="btn btn-outline" id="progress-cancel-btn" onclick="cancelProgress()" style="margin-top:var(--sp-md)">Cancel</button>
   </div>
 </div>
 
@@ -971,9 +972,13 @@ function spin(id, on) {
 }
 
 /* ── Progress modal helpers ────────────────────────────────────────── */
+let _progressAbortController = null;
+
 function showProgress(title, text) {
+  _progressAbortController = new AbortController();
   document.getElementById('progress-title').textContent = title || 'Processing…';
   document.getElementById('progress-text').textContent = text || '';
+  document.getElementById('progress-cancel-btn').style.display = '';
   document.getElementById('progress-modal').classList.add('open');
 }
 function updateProgress(text) {
@@ -981,6 +986,17 @@ function updateProgress(text) {
 }
 function hideProgress() {
   document.getElementById('progress-modal').classList.remove('open');
+  _progressAbortController = null;
+}
+function cancelProgress() {
+  if (_progressAbortController) {
+    _progressAbortController.abort();
+    _progressAbortController = null;
+  }
+  hideProgress();
+}
+function getAbortSignal() {
+  return _progressAbortController ? _progressAbortController.signal : undefined;
 }
 
 /* ── Extract error detail from a fetch Response ────────────────────── */
@@ -1150,7 +1166,7 @@ async function mergePdfs() {
     fd.append('file_paths', _mergeDesktopFiles.join('\n'));
     try {
       showProgress('Merging PDFs…', `${_mergeDesktopFiles.length} files`);
-      const res = await fetch('/api/pdf/merge-by-path', { method: 'POST', body: fd });
+      const res = await fetch('/api/pdf/merge-by-path', { method: 'POST', body: fd, signal: getAbortSignal() });
       if (!res.ok) { showResult('merge-result', await errorDetail(res), 'error'); return; }
       const blob = await res.blob();
       if (isDesktop) {
@@ -1164,6 +1180,7 @@ async function mergePdfs() {
         showResult('merge-result', 'Merge successful – download started.', 'success');
       }
     } catch (e) {
+      if (e.name === 'AbortError') return;
       showResult('merge-result', 'Merge failed: ' + e, 'error');
     } finally { hideProgress(); }
     return;
@@ -1176,7 +1193,7 @@ async function mergePdfs() {
 
   try {
     showProgress('Merging PDFs…', `${_mergeFiles.length} files`);
-    const res = await fetch('/api/pdf/merge', { method: 'POST', body: fd });
+    const res = await fetch('/api/pdf/merge', { method: 'POST', body: fd, signal: getAbortSignal() });
     if (!res.ok) { showResult('merge-result', await errorDetail(res), 'error'); return; }
     const blob = await res.blob();
     if (isDesktop) {
@@ -1190,6 +1207,7 @@ async function mergePdfs() {
       showResult('merge-result', 'Merge successful – download started.', 'success');
     }
   } catch (e) {
+    if (e.name === 'AbortError') return;
     showResult('merge-result', 'Merge failed: ' + e, 'error');
   } finally { hideProgress(); }
 }
@@ -1250,11 +1268,12 @@ async function splitPdf() {
       upFd.append('file', input.files[0]);
       try {
         showProgress('Uploading PDF…');
-        const upRes = await fetch('/api/pdf/upload-temp', { method: 'POST', body: upFd });
+        const upRes = await fetch('/api/pdf/upload-temp', { method: 'POST', body: upFd, signal: getAbortSignal() });
         if (!upRes.ok) { hideProgress(); showResult('split-result', await errorDetail(upRes), 'error'); return; }
         const upData = await upRes.json();
         filePath = upData.path;
       } catch (e) {
+        if (e.name === 'AbortError') return;
         showResult('split-result', 'Upload failed: ' + e, 'error'); return;
       } finally { hideProgress(); }
     }
@@ -1280,11 +1299,12 @@ async function splitPdf() {
     };
 
     try {
-      spin('split-spinner', true);
+      showProgress('Splitting PDF…', 'Writing to folder');
       const res = await fetch('/api/pdf/split-to-folder', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body),
+        signal: getAbortSignal(),
       });
       if (!res.ok) { showResult('split-result', await errorDetail(res), 'error'); return; }
       const data = await res.json();
@@ -1303,8 +1323,9 @@ async function splitPdf() {
         await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: outDir }) });
       }
     } catch (e) {
+      if (e.name === 'AbortError') return;
       showResult('split-result', 'Split failed: ' + e, 'error');
-    } finally { spin('split-spinner', false); }
+    } finally { hideProgress(); }
     return;
   }
 
@@ -1324,15 +1345,16 @@ async function splitPdf() {
   }
 
   try {
-    spin('split-spinner', true);
+    showProgress('Splitting PDF…');
     const endpoint = _splitDesktopFile ? '/api/pdf/split-by-path' : '/api/pdf/split';
-    const res = await fetch(endpoint, { method: 'POST', body: fd });
+    const res = await fetch(endpoint, { method: 'POST', body: fd, signal: getAbortSignal() });
     if (!res.ok) { showResult('split-result', await errorDetail(res), 'error'); return; }
     downloadBlob(await res.blob(), 'split.zip');
     showResult('split-result', 'Split successful – download started.', 'success');
   } catch (e) {
+    if (e.name === 'AbortError') return;
     showResult('split-result', 'Split failed: ' + e, 'error');
-  } finally { spin('split-spinner', false); }
+  } finally { hideProgress(); }
 }
 
 async function _splitConfirmOverwrite() {
@@ -1346,6 +1368,7 @@ async function _splitConfirmOverwrite() {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(_splitPendingBody),
+      signal: getAbortSignal(),
     });
     if (!res.ok) { showResult('split-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
@@ -1353,6 +1376,9 @@ async function _splitConfirmOverwrite() {
     if (document.getElementById('split-open-folder').checked) {
       await fetch('/api/file/open', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: _splitPendingBody.output_dir }) });
     }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    showResult('split-result', 'Split failed: ' + e, 'error');
   } finally {
     hideProgress();
     _splitPendingBody = null;
@@ -1384,7 +1410,7 @@ async function compareDirectories() {
 
   try {
     showProgress('Comparing Directories…', `${source} → ${target}`);
-    const res = await fetch('/api/dir/compare', { method: 'POST', body: fd });
+    const res = await fetch('/api/dir/compare', { method: 'POST', body: fd, signal: getAbortSignal() });
     if (!res.ok) { showResult('compare-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
     document.getElementById('compare-result').className = 'result-box';
@@ -1423,6 +1449,7 @@ async function compareDirectories() {
       card.style.display = '';
     }
   } catch (e) {
+    if (e.name === 'AbortError') return;
     showResult('compare-result', 'Compare failed: ' + e, 'error');
   } finally { hideProgress(); }
 }
@@ -1444,11 +1471,12 @@ async function syncDirectories() {
 
   try {
     showProgress('Syncing Files…', `${checked.length} file(s)`);
-    const res = await fetch('/api/dir/sync', { method: 'POST', body: fd });
+    const res = await fetch('/api/dir/sync', { method: 'POST', body: fd, signal: getAbortSignal() });
     if (!res.ok) { showResult('sync-result', await errorDetail(res), 'error'); return; }
     const data = await res.json();
     showResult('sync-result', `Copied ${data.copied.length} file(s):\n${data.copied.join('\n')}`, 'success');
   } catch (e) {
+    if (e.name === 'AbortError') return;
     showResult('sync-result', 'Sync failed: ' + e, 'error');
   } finally { hideProgress(); }
 }
@@ -1561,6 +1589,7 @@ async function scanDedup() {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ directory: dir }),
+      signal: getAbortSignal(),
     });
     if (!res.ok) { showResult('dedup-result', await errorDetail(res), 'error'); return; }
 
@@ -1608,6 +1637,7 @@ async function scanDedup() {
     renderDedupGroups(dup_dirs, 'folder', 'Duplicate Directories');
     renderDedupGroups(dup_files, 'insert_drive_file', 'Duplicate Files');
   } catch (e) {
+    if (e.name === 'AbortError') return;
     showResult('dedup-result', 'Scan failed: ' + e, 'error');
   } finally { hideProgress(); }
 }

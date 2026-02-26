@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -65,9 +66,10 @@ def run_desktop(
     """
     # Set a custom AppUserModelID so Windows shows our icon in the taskbar
     # instead of the default Python icon.
-    import ctypes  # noqa: PLC0415
+    if sys.platform == "win32":
+        import ctypes  # noqa: PLC0415
 
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DrMichaelMueller.FileTools")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DrMichaelMueller.FileTools")
 
     port = _find_port(host, port, _PORT_ATTEMPTS)
 
