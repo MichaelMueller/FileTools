@@ -85,6 +85,7 @@ def run_desktop(
         width=1200,
         height=800,
         resizable=True,
+        text_select=True,
     )
 
     def _on_loaded() -> None:

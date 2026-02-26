@@ -1,5 +1,21 @@
 # Agent Log
 
+## 2026-02-26 15:00 – EXIF-based date sorting, text selection, font URL fix, cache control
+
+- **EXIF date extraction**: Rewrote `DateSorter._creation_time()` to first try reading EXIF tags (`DateTimeOriginal`, `DateTimeDigitized`, `DateTime`) via Pillow before falling back to filesystem timestamps. This fixes the issue where photos copied from a smartphone had a Windows "created" date (file copy date) newer than the modification date (original capture date). New `_exif_timestamp()` static method handles parsing; errors are silently caught.
+- **Text selection enabled**: Added `text_select=True` to `webview.create_window()` in `desktop.py`. pywebview disables text selection by default.
+- **Font URL fix**: Changed `@font-face` `src` URLs from `url(fonts/...)` to `url(static/fonts/...)` because the HTML is served from root `/` but static files are mounted at `/static/`. This fixed the "text shows as icon names" bug (Material Icons font wasn't loading).
+- **Cache-Control header**: Added `Cache-Control: no-cache` to the root `FileResponse` for `index.html` to prevent WebView2's aggressive disk cache from serving stale HTML.
+- **WebView2 cache clearing**: Identified and cleared three WebView2 cache directories (`%LOCALAPPDATA%\FileTools`, `%APPDATA%\pywebview`, `%LOCALAPPDATA%\WindowsControlWebView2`) that were causing the app to serve old HTML.
+- **New tests**: 7 new tests for EXIF date handling (`test_returns_none_for_non_image`, `test_returns_none_for_image_without_exif`, `test_reads_datetime_original`, `test_prefers_datetime_original_over_datetime`, `test_exif_date_used_by_creation_time`, `test_corrupted_exif_returns_none`). Updated existing `test_fallback_without_birthtime` to mock EXIF as None.
+
+## 2026-02-26 14:13 – Offline fonts, scrollbar styling, GitHub link update
+
+- **Offline fonts**: Downloaded Roboto (latin + latin-ext variable woff2) and Material Icons woff2 to `file_tools/static/fonts/`. Removed the 3 external `<link>` tags to Google Fonts CDN. Added local `@font-face` declarations (Roboto variable weight 300–700, Material Icons) and a `.material-icons` utility class directly in the `<style>` block. The app now works fully offline with no external requests.
+- **Scrollbar styling**: Added dark-themed custom scrollbar CSS using `::-webkit-scrollbar` pseudo-elements. 8px width/height, `--clr-surface2` track, `--clr-outline` thumb with `--clr-muted` on hover. Applies globally to all scrollable areas (modals, check-lists, etc.).
+- **GitHub link update**: Changed all 3 GitHub links (Imprint modal, Data Privacy modal, footer) from `https://github.com/muellermic` to `https://github.com/MichaelMueller/FileTools`.
+- **Data Privacy update**: Section 4 "Third-Party Services" rewritten to state that no external services are used and all assets are bundled locally (previously mentioned Google Fonts requests).
+
 ## 2026-02-26 10:00 – Date Sorter feature, cancel buttons, splash screen fixes, v1.1.0
 
 - **Cancel button in progress dialogs**: Added a Cancel button to the progress modal overlay. Implemented `AbortController` pattern: `showProgress()` creates a new `AbortController`, `cancelProgress()` calls `.abort()`, `getAbortSignal()` passes the signal to `fetch()`. All action functions (`mergePdfs`, `splitPdf`, `_splitConfirmOverwrite`, `compareDirectories`, `syncDirectories`, `scanDedup`) now pass `signal: getAbortSignal()` and catch `AbortError` silently. Fixed `splitPdf` inconsistency where two code paths still used `spin()` instead of `showProgress()`.

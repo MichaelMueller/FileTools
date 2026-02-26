@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -86,8 +86,90 @@ class TestCreationTime:
             # no st_birthtime attribute
 
         with patch.object(Path, "stat", return_value=FakeStat()):
-            ts = DateSorter._creation_time(path)
+            with patch.object(DateSorter, "_exif_timestamp", return_value=None):
+                ts = DateSorter._creation_time(path)
         assert ts == min(real_stat.st_ctime, real_stat.st_mtime)
+
+
+# ---------------------------------------------------------------------------
+# _exif_timestamp
+# ---------------------------------------------------------------------------
+
+
+class TestExifTimestamp:
+    """Tests for DateSorter._exif_timestamp."""
+
+    def test_returns_none_for_non_image(self, tmp_path: Path) -> None:
+        """Non-image files should return None."""
+        txt = tmp_path / "file.txt"
+        txt.write_text("hello")
+        assert DateSorter._exif_timestamp(txt) is None
+
+    def test_returns_none_for_image_without_exif(self, tmp_path: Path) -> None:
+        """JPEG without EXIF data should return None."""
+        # Minimal valid JPEG (no EXIF)
+        jpg = tmp_path / "noexif.jpg"
+        jpg.write_bytes(b"\xff\xd8\xff\xd9")
+        assert DateSorter._exif_timestamp(jpg) is None
+
+    def test_reads_datetime_original(self, tmp_path: Path) -> None:
+        """Should parse DateTimeOriginal from EXIF."""
+        from PIL import Image  # noqa: PLC0415
+
+        img = Image.new("RGB", (1, 1))
+        from PIL.ExifTags import Base as ExifBase  # noqa: PLC0415
+
+        exif = img.getexif()
+        exif[ExifBase.DateTimeOriginal] = "2025:09:19 14:30:00"
+        jpg = tmp_path / "with_exif.jpg"
+        img.save(jpg, exif=exif.tobytes())
+
+        ts = DateSorter._exif_timestamp(jpg)
+        assert ts is not None
+        lt = time.localtime(ts)
+        assert lt.tm_year == 2025
+        assert lt.tm_mon == 9
+        assert lt.tm_mday == 19
+
+    def test_prefers_datetime_original_over_datetime(self, tmp_path: Path) -> None:
+        """DateTimeOriginal should take priority over DateTime."""
+        from PIL import Image  # noqa: PLC0415
+        from PIL.ExifTags import Base as ExifBase  # noqa: PLC0415
+
+        img = Image.new("RGB", (1, 1))
+        exif = img.getexif()
+        exif[ExifBase.DateTime] = "2025:11:13 12:00:00"
+        exif[ExifBase.DateTimeOriginal] = "2025:09:19 14:30:00"
+        jpg = tmp_path / "both_exif.jpg"
+        img.save(jpg, exif=exif.tobytes())
+
+        ts = DateSorter._exif_timestamp(jpg)
+        lt = time.localtime(ts)
+        assert lt.tm_mon == 9  # should use Original, not DateTime
+
+    def test_exif_date_used_by_creation_time(self, tmp_path: Path) -> None:
+        """_creation_time should prefer EXIF over filesystem dates."""
+        from PIL import Image  # noqa: PLC0415
+        from PIL.ExifTags import Base as ExifBase  # noqa: PLC0415
+
+        img = Image.new("RGB", (1, 1))
+        exif = img.getexif()
+        exif[ExifBase.DateTimeOriginal] = "2025:09:19 18:21:39"
+        jpg = tmp_path / "photo.jpg"
+        img.save(jpg, exif=exif.tobytes())
+
+        ts = DateSorter._creation_time(jpg)
+        lt = time.localtime(ts)
+        assert lt.tm_year == 2025
+        assert lt.tm_mon == 9
+
+    def test_corrupted_exif_returns_none(self, tmp_path: Path) -> None:
+        """Corrupted EXIF should not crash, just return None."""
+        jpg = tmp_path / "corrupt.jpg"
+        # Invalid JPEG-like bytes
+        jpg.write_bytes(b"\xff\xd8\xff\xe1\x00\x08Exif\x00\x00GARBAGE")
+        result = DateSorter._exif_timestamp(jpg)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

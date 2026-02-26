@@ -5,6 +5,8 @@ from __future__ import annotations
 import calendar
 import os
 import shutil
+import time as _time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -12,17 +14,61 @@ from typing import Callable
 class DateSorter:
     """Scan files in a directory and sort them into ``YYYY/MM_Mon`` folders.
 
-    The creation date is determined from the file's metadata:
-    the birth-time (``st_birthtime``) is preferred when available,
-    falling back to the earliest of ``st_mtime`` and ``st_ctime``.
+    The creation date is determined with the following priority:
+
+    1. **EXIF metadata** – ``DateTimeOriginal`` or ``DateTimeDigitized``
+       (the actual moment a photo was taken on the camera / smartphone).
+    2. **File-system birth-time** (``st_birthtime``), available on Windows
+       and macOS 10.13+.
+    3. **Fallback** – the earlier of ``st_mtime`` and ``st_ctime``.
 
     The preview step builds a plan without moving anything.  The user
     must explicitly call :meth:`execute` with the plan to perform moves.
     """
 
+    # EXIF tag IDs
+    _EXIF_DATETIME_ORIGINAL = 0x9003   # 36867
+    _EXIF_DATETIME_DIGITIZED = 0x9004  # 36868
+    _EXIF_DATETIME = 0x0132            # 306  (less specific fallback)
+
+    @staticmethod
+    def _exif_timestamp(path: Path) -> float | None:
+        """Try to extract a creation timestamp from EXIF data.
+
+        Returns a Unix timestamp or ``None`` if no usable tag is found.
+        """
+        try:
+            from PIL import Image  # noqa: PLC0415
+
+            with Image.open(path) as img:
+                exif = img.getexif()
+                if not exif:
+                    return None
+                for tag_id in (
+                    DateSorter._EXIF_DATETIME_ORIGINAL,
+                    DateSorter._EXIF_DATETIME_DIGITIZED,
+                    DateSorter._EXIF_DATETIME,
+                ):
+                    val = exif.get(tag_id)
+                    if val:
+                        # Format: "YYYY:MM:DD HH:MM:SS"
+                        dt = datetime.strptime(val, "%Y:%m:%d %H:%M:%S")
+                        return dt.timestamp()
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
     @staticmethod
     def _creation_time(path: Path) -> float:
-        """Return the best-guess creation timestamp for *path*."""
+        """Return the best-guess creation timestamp for *path*.
+
+        Prefers EXIF date, then ``st_birthtime``, then
+        ``min(st_ctime, st_mtime)``.
+        """
+        exif_ts = DateSorter._exif_timestamp(path)
+        if exif_ts is not None:
+            return exif_ts
+
         st = path.stat()
         # st_birthtime is available on Windows and macOS 10.13+
         if hasattr(st, "st_birthtime"):
