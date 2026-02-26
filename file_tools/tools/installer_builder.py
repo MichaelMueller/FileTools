@@ -37,7 +37,7 @@ class InstallerBuilder:
     ]
 
     APP_NAME = "FileTools"
-    APP_VERSION = "1.1.0"
+    APP_VERSION = "1.2.0"
     APP_PUBLISHER = "Dr. Michael Müller"
     APP_EXE_NAME = "FileTools.bat"
 

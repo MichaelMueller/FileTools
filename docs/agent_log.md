@@ -1,5 +1,15 @@
 # Agent Log
 
+## 2026-02-26 15:30 – README with screenshots, EXIF date sorting, text selection
+
+- **README.md**: Complete rewrite with project description, feature overview with screenshots, installation/usage instructions, technology stack table, development guide (project structure, coding conventions, running tests, building installer), privacy section, and author info linking to michaelmuelleronline.de. Notes AI-assisted creation.
+- **Screenshots**: Captured 5 screenshots (one per tab) via Playwright headless Chromium and saved to `docs/screenshots/` — `pdf_merge.png`, `pdf_split.png`, `dir_compare.png`, `dedup.png`, `date_sorter.png`.
+- **EXIF date extraction**: `DateSorter._creation_time()` now reads EXIF `DateTimeOriginal` / `DateTimeDigitized` / `DateTime` via Pillow before falling back to filesystem timestamps. Fixes photo sorting for smartphone images where Windows "created" date differs from actual capture date.
+- **Text selection**: Added `text_select=True` to `webview.create_window()` in `desktop.py`. pywebview disables text selection by default.
+- **Font URL fix**: Changed `@font-face` src from `url(fonts/...)` to `url(static/fonts/...)` — HTML served from `/` but static mount is at `/static/`.
+- **Cache-Control header**: Added `Cache-Control: no-cache` to root `FileResponse` to prevent stale WebView2 cache.
+- **New tests**: 7 EXIF-related tests in `test_date_sorter.py`, updated `test_fallback_without_birthtime` to mock `_exif_timestamp`.
+
 ## 2026-02-26 15:00 – EXIF-based date sorting, text selection, font URL fix, cache control
 
 - **EXIF date extraction**: Rewrote `DateSorter._creation_time()` to first try reading EXIF tags (`DateTimeOriginal`, `DateTimeDigitized`, `DateTime`) via Pillow before falling back to filesystem timestamps. This fixes the issue where photos copied from a smartphone had a Windows "created" date (file copy date) newer than the modification date (original capture date). New `_exif_timestamp()` static method handles parsing; errors are silently caught.

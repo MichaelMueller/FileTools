@@ -27,7 +27,7 @@ from file_tools.tools.pdf_tools import (
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="FileTools", version="1.1.0")
+app = FastAPI(title="FileTools", version="1.2.0")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
