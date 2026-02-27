@@ -37,7 +37,7 @@ class InstallerBuilder:
     ]
 
     APP_NAME = "FileTools"
-    APP_VERSION = "1.2.0"
+    APP_VERSION = "1.3.0"
     APP_PUBLISHER = "Dr. Michael Müller"
     APP_EXE_NAME = "FileTools.bat"
 
@@ -99,11 +99,81 @@ class InstallerBuilder:
             stderr=subprocess.DEVNULL,
         )
 
+    # Packages to pre-seed from the build venv because they lack
+    # compatible wheels on newer Python versions.
+    _PRESEED_GLOBS = (
+        "pythonnet*", "clr_loader*", "cffi*", "pycparser*",
+    )
+
     def _install_deps(self) -> None:
-        """Install the project into the portable venv."""
+        """Install the project into the portable venv.
+
+        pythonnet does not yet publish wheels for Python >= 3.14, so we
+        use a two-phase approach:
+        1. Pre-seed pythonnet (and transitive deps) by copying them
+           from the project's *.venv* — they have no compatible wheel
+           on PyPI.
+        2. Freeze that same venv to get every other transitive dep,
+           then ``pip install --no-deps`` everything so pip never tries
+           to resolve pythonnet.
+        """
         pip = self._staging / "app" / ".venv" / "Scripts" / "pip.exe"
+        staging_sp = self._staging / "app" / ".venv" / "Lib" / "site-packages"
+
+        # Locate the project's development venv.
+        dev_venv = self.project_root / ".venv"
+        dev_python = dev_venv / "Scripts" / "python.exe"
+        dev_sp = dev_venv / "Lib" / "site-packages"
+
+        # ── 1. Pre-seed pythonnet + transitive deps ──────────────────
+        preseed_names: set[str] = set()
+        for pkg_pattern in self._PRESEED_GLOBS:
+            for src in dev_sp.glob(pkg_pattern):
+                dst = staging_sp / src.name
+                if dst.exists():
+                    continue
+                if src.is_dir():
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+                # Track canonical package names for later exclusion
+                name = src.name.split("-")[0].split(".")[0].lower()
+                preseed_names.add(name)
+
+        # ── 2. Freeze the dev env and write a filtered reqs file ─────
+        freeze = subprocess.check_output(
+            [str(dev_python), "-m", "pip", "freeze",
+             "--exclude-editable"],
+            text=True,
+        )
+        skip = preseed_names | {"file-tools", "file_tools", "pip",
+                                "setuptools", "wheel"}
+        reqs: list[str] = []
+        for line in freeze.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            pkg = line.split("==")[0].split("@")[0].strip().lower()
+            pkg = pkg.replace("-", "_")
+            if pkg in {s.replace("-", "_") for s in skip}:
+                continue
+            reqs.append(line)
+
+        req_file = self._staging / "requirements.txt"
+        req_file.write_text("\n".join(reqs), encoding="utf-8")
+
+        # ── 3. Install deps without resolution (pre-seeded pkgs ok) ──
         subprocess.check_call(
-            [str(pip), "install", str(self.project_root), "--no-warn-script-location", "-q"],
+            [str(pip), "install", "--no-deps", "--no-warn-script-location",
+             "-q", "-r", str(req_file)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # ── 4. Install the project itself (no deps — already done) ───
+        subprocess.check_call(
+            [str(pip), "install", "--no-deps", "--no-warn-script-location",
+             "-q", str(self.project_root)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

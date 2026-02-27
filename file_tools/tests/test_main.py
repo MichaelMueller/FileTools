@@ -524,12 +524,21 @@ def test_dialog_directory_no_desktop(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _mock_webview() -> MagicMock:
+    """Create a mock webview module with the new FileDialog enum."""
+    wv = MagicMock()
+    wv.FileDialog.OPEN = 0
+    wv.FileDialog.SAVE = 1
+    wv.FileDialog.FOLDER = 2
+    return wv
+
+
 def test_dialog_files_with_window(client: TestClient) -> None:
     mock_window = MagicMock()
     mock_window.create_file_dialog.return_value = ["/tmp/a.pdf", "/tmp/b.pdf"]
     set_webview_window(mock_window)
 
-    with patch.dict("sys.modules", {"webview": MagicMock(OPEN_DIALOG=0, FOLDER_DIALOG=1)}):
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
         r = client.get("/api/dialog/files?multiple=true")
     assert r.status_code == 200
     assert r.json()["files"] == ["/tmp/a.pdf", "/tmp/b.pdf"]
@@ -540,7 +549,7 @@ def test_dialog_files_cancelled(client: TestClient) -> None:
     mock_window.create_file_dialog.return_value = None
     set_webview_window(mock_window)
 
-    with patch.dict("sys.modules", {"webview": MagicMock(OPEN_DIALOG=0, FOLDER_DIALOG=1)}):
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
         r = client.get("/api/dialog/files")
     assert r.status_code == 200
     assert r.json()["files"] == []
@@ -551,7 +560,7 @@ def test_dialog_directory_with_window(client: TestClient) -> None:
     mock_window.create_file_dialog.return_value = ["/tmp/mydir"]
     set_webview_window(mock_window)
 
-    with patch.dict("sys.modules", {"webview": MagicMock(OPEN_DIALOG=0, FOLDER_DIALOG=1)}):
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
         r = client.get("/api/dialog/directory")
     assert r.status_code == 200
     assert r.json()["directory"] == "/tmp/mydir"
@@ -562,7 +571,7 @@ def test_dialog_directory_cancelled(client: TestClient) -> None:
     mock_window.create_file_dialog.return_value = None
     set_webview_window(mock_window)
 
-    with patch.dict("sys.modules", {"webview": MagicMock(OPEN_DIALOG=0, FOLDER_DIALOG=1)}):
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
         r = client.get("/api/dialog/directory")
     assert r.status_code == 200
     assert r.json()["directory"] is None
@@ -580,30 +589,489 @@ def test_set_webview_window_updates_module() -> None:
 
 
 # ---------------------------------------------------------------------------
-# GPS Sort
+# PDF 2 DCM
 # ---------------------------------------------------------------------------
 
 
-def test_gps_sort_aliases_list(client: TestClient) -> None:
-    with patch("file_tools.main.GpsSorter") as MockSorter:
-        MockSorter.return_value.get_aliases.return_value = [
-            {"id": 1, "alias": "Home", "lat": 48.0, "lon": 11.0, "radius_km": 5.0},
+def test_pdf2dcm_tags(client: TestClient) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.common_tags.return_value = [
+            {"keyword": "PatientName", "label": "Patient Name", "default": ""},
         ]
-        r = client.get("/api/gps-sort/aliases")
+        r = client.get("/api/pdf2dcm/tags")
     assert r.status_code == 200
-    assert len(r.json()["aliases"]) == 1
+    tags = r.json()["tags"]
+    assert len(tags) == 1
+    assert tags[0]["keyword"] == "PatientName"
 
 
-def test_gps_sort_aliases_delete(client: TestClient) -> None:
+def test_pdf2dcm_convert(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF-1.4 minimal")
+
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.return_value = b"DICOM_DATA"
+        with open(pdf, "rb") as f:
+            r = client.post(
+                "/api/pdf2dcm/convert",
+                files={"pdf": ("test.pdf", f, "application/pdf")},
+                data={"tags_json": '{"PatientName": "Test"}'},
+            )
+    assert r.status_code == 200
+    assert r.content == b"DICOM_DATA"
+    assert "test.dcm" in r.headers.get("content-disposition", "")
+
+
+def test_pdf2dcm_convert_with_template(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4 data")
+    tmpl = tmp_path / "tmpl.dcm"
+    tmpl.write_bytes(b"DICOM TEMPLATE")
+
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.return_value = b"DCM_WITH_TMPL"
+        with open(pdf, "rb") as fp, open(tmpl, "rb") as ft:
+            r = client.post(
+                "/api/pdf2dcm/convert",
+                files={
+                    "pdf": ("doc.pdf", fp, "application/pdf"),
+                    "template": ("tmpl.dcm", ft, "application/dicom"),
+                },
+                data={"tags_json": "{}"},
+            )
+    assert r.status_code == 200
+    assert r.content == b"DCM_WITH_TMPL"
+
+
+def test_pdf2dcm_convert_empty_pdf(client: TestClient) -> None:
+    from io import BytesIO
+    r = client.post(
+        "/api/pdf2dcm/convert",
+        files={"pdf": ("empty.pdf", BytesIO(b""), "application/pdf")},
+        data={"tags_json": "{}"},
+    )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_convert_bad_tags_json(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF-1.4 data")
+    with open(pdf, "rb") as f:
+        r = client.post(
+            "/api/pdf2dcm/convert",
+            files={"pdf": ("test.pdf", f, "application/pdf")},
+            data={"tags_json": "NOT JSON"},
+        )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_convert_desktop(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(b"%PDF-1.4 data")
+    output = tmp_path / "output.dcm"
+
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.return_value = b"DCM_DESKTOP"
+        r = client.post(
+            "/api/pdf2dcm/convert-desktop",
+            json={
+                "pdf_path": str(pdf),
+                "output_path": str(output),
+                "tags": {"PatientName": "Desktop"},
+            },
+        )
+    assert r.status_code == 200
+    assert output.read_bytes() == b"DCM_DESKTOP"
+    assert r.json()["saved"] == str(output)
+
+
+def test_pdf2dcm_convert_desktop_missing_pdf(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf2dcm/convert-desktop",
+        json={"pdf_path": "", "output_path": "/tmp/out.dcm"},
+    )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_convert_desktop_missing_output(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf2dcm/convert-desktop",
+        json={"pdf_path": "/tmp/test.pdf", "output_path": ""},
+    )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_convert_desktop_file_not_found(
+    client: TestClient,
+) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.side_effect = FileNotFoundError("not found")
+        r = client.post(
+            "/api/pdf2dcm/convert-desktop",
+            json={
+                "pdf_path": "/nonexistent.pdf",
+                "output_path": "/tmp/out.dcm",
+            },
+        )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_convert_desktop_conversion_error(
+    client: TestClient,
+) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.side_effect = RuntimeError("conversion error")
+        r = client.post(
+            "/api/pdf2dcm/convert-desktop",
+            json={
+                "pdf_path": "/some.pdf",
+                "output_path": "/tmp/out.dcm",
+            },
+        )
+    assert r.status_code == 500
+
+
+# -- Tag configuration API ---------------------------------------------------
+
+
+def test_pdf2dcm_configs_empty(client: TestClient) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.return_value.get_configs.return_value = []
+        r = client.get("/api/pdf2dcm/configs")
+    assert r.status_code == 200
+    assert r.json()["configs"] == []
+
+
+def test_pdf2dcm_configs_list(client: TestClient) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.return_value.get_configs.return_value = [
+            {"id": 1, "name": "mbits", "tags": {"PatientName": "mbits"}},
+        ]
+        r = client.get("/api/pdf2dcm/configs")
+    assert r.status_code == 200
+    cfgs = r.json()["configs"]
+    assert len(cfgs) == 1
+    assert cfgs[0]["name"] == "mbits"
+
+
+def test_pdf2dcm_save_config(client: TestClient) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.return_value.save_config.return_value = {
+            "id": 1, "name": "test", "tags": {"PatientID": "123"},
+        }
+        r = client.post(
+            "/api/pdf2dcm/configs",
+            json={"name": "test", "tags": {"PatientID": "123"}},
+        )
+    assert r.status_code == 200
+    assert r.json()["name"] == "test"
+
+
+def test_pdf2dcm_save_config_empty_name(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf2dcm/configs",
+        json={"name": "", "tags": {}},
+    )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_delete_config(client: TestClient) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.return_value.delete_config.return_value = True
+        r = client.delete("/api/pdf2dcm/configs/1")
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 1
+
+
+def test_pdf2dcm_delete_config_not_found(client: TestClient) -> None:
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.return_value.delete_config.return_value = False
+        r = client.delete("/api/pdf2dcm/configs/999")
+    assert r.status_code == 404
     with patch("file_tools.main.GpsSorter") as MockSorter:
-        MockSorter.return_value.delete_alias.return_value = None
+        MockSorter.return_value.get_regions.return_value = [
+            {"id": 1, "name": "Home", "areas": [
+                {"id": 10, "geocoded_name": "DE/Munich",
+                 "lat": 48.0, "lon": 11.0, "radius_km": 5.0, "region_id": 1},
+            ]},
+        ]
+        r = client.get("/api/gps-sort/regions")
+    assert r.status_code == 200
+    regions = r.json()["regions"]
+    assert len(regions) == 1
+    assert regions[0]["name"] == "Home"
+    assert len(regions[0]["areas"]) == 1
+
+
+def test_gps_sort_regions_create(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.add_region.return_value = {
+            "id": 2, "name": "Vacation", "areas": [],
+        }
+        r = client.post(
+            "/api/gps-sort/regions",
+            json={"name": "Vacation"},
+        )
+    assert r.status_code == 200
+    assert r.json()["region"]["name"] == "Vacation"
+
+
+def test_gps_sort_regions_create_empty_name(client: TestClient) -> None:
+    r = client.post(
+        "/api/gps-sort/regions",
+        json={"name": "  "},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_regions_update(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.update_region.return_value = {
+            "id": 1, "name": "Updated", "areas": [],
+        }
+        r = client.put(
+            "/api/gps-sort/regions",
+            json={"id": 1, "name": "Updated"},
+        )
+    assert r.status_code == 200
+    assert r.json()["region"]["name"] == "Updated"
+
+
+def test_gps_sort_regions_update_not_found(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.update_region.return_value = None
+        r = client.put(
+            "/api/gps-sort/regions",
+            json={"id": 9999, "name": "X"},
+        )
+    assert r.status_code == 404
+
+
+def test_gps_sort_regions_update_missing_id(client: TestClient) -> None:
+    r = client.put(
+        "/api/gps-sort/regions",
+        json={"name": "X"},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_regions_delete(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.delete_region.return_value = None
         r = client.request(
             "DELETE",
-            "/api/gps-sort/aliases",
+            "/api/gps-sort/regions",
             json={"id": 1},
         )
     assert r.status_code == 200
     assert r.json()["deleted"] is True
+
+
+# ---------------------------------------------------------------------------
+# GPS Sort — Areas
+# ---------------------------------------------------------------------------
+
+
+def test_gps_sort_areas_list(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.get_areas.return_value = [
+            {"id": 10, "geocoded_name": "DE/Munich",
+             "lat": 48.0, "lon": 11.0, "radius_km": 5.0, "region_id": None},
+        ]
+        r = client.get("/api/gps-sort/areas")
+    assert r.status_code == 200
+    areas = r.json()["areas"]
+    assert len(areas) == 1
+    assert areas[0]["geocoded_name"] == "DE/Munich"
+
+
+def test_gps_sort_areas_create(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.add_area.return_value = {
+            "id": 20, "geocoded_name": "Beach", "lat": 25.0, "lon": 55.0,
+            "radius_km": 3.0, "region_id": None,
+        }
+        r = client.post(
+            "/api/gps-sort/areas",
+            json={"geocoded_name": "Beach", "lat": 25.0, "lon": 55.0,
+                  "radius_km": 3.0},
+        )
+    assert r.status_code == 200
+    assert r.json()["area"]["geocoded_name"] == "Beach"
+
+
+def test_gps_sort_areas_create_from_url(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.parse_google_maps_url.return_value = (48.0, 11.0)
+        MockSorter.return_value.add_area.return_value = {
+            "id": 21, "geocoded_name": "Home", "lat": 48.0, "lon": 11.0,
+            "radius_km": 5.0, "region_id": None,
+        }
+        r = client.post(
+            "/api/gps-sort/areas",
+            json={
+                "geocoded_name": "Home",
+                "url": "https://www.google.com/maps/@48.0,11.0,15z",
+                "radius_km": 5.0,
+            },
+        )
+    assert r.status_code == 200
+    assert r.json()["area"]["geocoded_name"] == "Home"
+
+
+def test_gps_sort_areas_create_bad_url(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.parse_google_maps_url.return_value = None
+        r = client.post(
+            "/api/gps-sort/areas",
+            json={"geocoded_name": "X", "url": "not-a-url"},
+        )
+    assert r.status_code == 422
+
+
+def test_gps_sort_areas_create_missing_coords(client: TestClient) -> None:
+    r = client.post(
+        "/api/gps-sort/areas",
+        json={"geocoded_name": "X"},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_areas_create_empty_name(client: TestClient) -> None:
+    r = client.post(
+        "/api/gps-sort/areas",
+        json={"geocoded_name": "", "lat": 1.0, "lon": 2.0},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_areas_create_with_region(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.add_area.return_value = {
+            "id": 22, "geocoded_name": "Place", "lat": 48.0, "lon": 11.0,
+            "radius_km": 5.0, "region_id": 1,
+        }
+        r = client.post(
+            "/api/gps-sort/areas",
+            json={"geocoded_name": "Place", "lat": 48.0, "lon": 11.0,
+                  "region_id": 1},
+        )
+    assert r.status_code == 200
+    assert r.json()["area"]["region_id"] == 1
+
+
+def test_gps_sort_areas_update(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.update_area.return_value = {
+            "id": 10, "geocoded_name": "Updated", "lat": 48.0, "lon": 11.0,
+            "radius_km": 10.0, "region_id": None,
+        }
+        r = client.put(
+            "/api/gps-sort/areas",
+            json={"id": 10, "geocoded_name": "Updated", "radius_km": 10.0},
+        )
+    assert r.status_code == 200
+    assert r.json()["area"]["geocoded_name"] == "Updated"
+
+
+def test_gps_sort_areas_update_region_id(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.update_area.return_value = {
+            "id": 10, "geocoded_name": "Place", "lat": 48.0, "lon": 11.0,
+            "radius_km": 5.0, "region_id": 2,
+        }
+        r = client.put(
+            "/api/gps-sort/areas",
+            json={"id": 10, "region_id": 2},
+        )
+    assert r.status_code == 200
+    assert r.json()["area"]["region_id"] == 2
+    MockSorter.return_value.update_area.assert_called_once_with(
+        10, region_id=2,
+    )
+
+
+def test_gps_sort_areas_update_unassign_region(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.update_area.return_value = {
+            "id": 10, "geocoded_name": "Place", "lat": 48.0, "lon": 11.0,
+            "radius_km": 5.0, "region_id": None,
+        }
+        r = client.put(
+            "/api/gps-sort/areas",
+            json={"id": 10, "region_id": None},
+        )
+    assert r.status_code == 200
+    assert r.json()["area"]["region_id"] is None
+    MockSorter.return_value.update_area.assert_called_once_with(
+        10, region_id=None,
+    )
+
+
+def test_gps_sort_areas_update_not_found(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.update_area.return_value = None
+        r = client.put(
+            "/api/gps-sort/areas",
+            json={"id": 9999, "geocoded_name": "X"},
+        )
+    assert r.status_code == 404
+
+
+def test_gps_sort_areas_update_missing_id(client: TestClient) -> None:
+    r = client.put(
+        "/api/gps-sort/areas",
+        json={"geocoded_name": "X"},
+    )
+    assert r.status_code == 422
+
+
+def test_gps_sort_areas_delete(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.delete_area.return_value = None
+        r = client.request(
+            "DELETE",
+            "/api/gps-sort/areas",
+            json={"id": 10},
+        )
+    assert r.status_code == 200
+    assert r.json()["deleted"] is True
+
+
+# ---------------------------------------------------------------------------
+# GPS Sort — Parse URL
+# ---------------------------------------------------------------------------
+
+
+def test_gps_sort_parse_url(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.parse_google_maps_url.return_value = (48.0, 11.0)
+        r = client.post(
+            "/api/gps-sort/parse-url",
+            json={"url": "https://www.google.com/maps/@48.0,11.0,15z"},
+        )
+    assert r.status_code == 200
+    assert r.json()["lat"] == 48.0
+    assert r.json()["lon"] == 11.0
+
+
+def test_gps_sort_parse_url_invalid(client: TestClient) -> None:
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.parse_google_maps_url.return_value = None
+        r = client.post(
+            "/api/gps-sort/parse-url",
+            json={"url": "bad"},
+        )
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GPS Sort — Preview / Reclassify / Execute
+# ---------------------------------------------------------------------------
 
 
 def test_gps_sort_preview_success(client: TestClient, tmp_path: Path) -> None:
@@ -622,10 +1090,10 @@ def test_gps_sort_preview_success(client: TestClient, tmp_path: Path) -> None:
                 "lon": None,
                 "location_name": "No GPS",
                 "group": "no_gps",
-                "trip_id": None,
+                "area_id": None,
             }
         ],
-        "trips": [],
+        "new_areas": [],
         "total": 1,
         "no_gps_count": 1,
     }
@@ -639,7 +1107,37 @@ def test_gps_sort_preview_success(client: TestClient, tmp_path: Path) -> None:
     data = r.json()
     assert data["total"] == 1
     assert data["no_gps_count"] == 1
-    assert len(data["trips"]) == 0
+    assert len(data["new_areas"]) == 0
+
+
+def test_gps_sort_reclassify_success(client: TestClient) -> None:
+    plan = [
+        {"file": "a.jpg", "source": "/tmp/a.jpg", "lat": 48.0, "lon": 11.0},
+    ]
+    fake_result = {
+        "plan": [dict(plan[0], group="area", folder="Home",
+                      destination="/tmp/Home/a.jpg", location_name="Home",
+                      area_id=1)],
+        "new_areas": [],
+        "total": 1,
+        "no_gps_count": 0,
+    }
+    with patch("file_tools.main.GpsSorter") as MockSorter:
+        MockSorter.return_value.reclassify.return_value = fake_result
+        r = client.post(
+            "/api/gps-sort/reclassify",
+            json={"plan": plan},
+        )
+    assert r.status_code == 200
+    assert r.json()["plan"][0]["group"] == "area"
+
+
+def test_gps_sort_reclassify_empty(client: TestClient) -> None:
+    r = client.post(
+        "/api/gps-sort/reclassify",
+        json={"plan": []},
+    )
+    assert r.status_code == 422
 
 
 def test_gps_sort_preview_not_a_directory(client: TestClient) -> None:
@@ -673,7 +1171,7 @@ def test_gps_sort_execute_success(client: TestClient, tmp_path: Path) -> None:
             "folder": "No GPS",
             "destination": str(tmp_path / "No GPS" / "a.jpg"),
             "group": "no_gps",
-            "trip_id": None,
+            "area_id": None,
         }
     ]
     moved_result = [plan[0]]
@@ -687,30 +1185,30 @@ def test_gps_sort_execute_success(client: TestClient, tmp_path: Path) -> None:
     assert r.json()["moved"] == 1
 
 
-def test_gps_sort_execute_with_trip_names(client: TestClient, tmp_path: Path) -> None:
+def test_gps_sort_execute_with_no_gps_name(client: TestClient, tmp_path: Path) -> None:
     plan = [
         {
             "file": "a.jpg",
             "source": str(tmp_path / "a.jpg"),
-            "folder": "AE/Dubai",
-            "destination": str(tmp_path / "AE/Dubai" / "a.jpg"),
-            "group": "trip",
-            "trip_id": 1,
+            "folder": "No GPS",
+            "destination": str(tmp_path / "No GPS" / "a.jpg"),
+            "group": "no_gps",
+            "area_id": None,
         }
     ]
-    moved_result = [dict(plan[0], folder="Dubai Holiday")]
+    moved_result = [dict(plan[0], folder="Unsorted")]
     with patch("file_tools.main.GpsSorter") as MockSorter:
         MockSorter.return_value.execute.return_value = moved_result
         r = client.post(
             "/api/gps-sort/execute",
-            json={"plan": plan, "trip_names": {"1": "Dubai Holiday"}},
+            json={"plan": plan, "no_gps_name": "Unsorted"},
         )
     assert r.status_code == 200
     assert r.json()["moved"] == 1
-    # Verify trip_names was passed through
+    # Verify no_gps_name was passed through
     MockSorter.return_value.execute.assert_called_once()
     call_kwargs = MockSorter.return_value.execute.call_args
-    assert call_kwargs[1]["trip_names"] == {"1": "Dubai Holiday"}
+    assert call_kwargs[1]["no_gps_name"] == "Unsorted"
 
 
 def test_gps_sort_execute_empty_plan(client: TestClient) -> None:

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 import xxhash
+from platformdirs import user_data_dir
 from sqlalchemy import Column, Float, String, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
@@ -46,9 +47,9 @@ class DedupScanner:
 
     def __init__(self, db_url: str | None = None) -> None:
         if db_url is None:
-            import tempfile  # noqa: PLC0415
-
-            db_path = Path(tempfile.gettempdir()) / "filetools_dedup.db"
+            db_dir = Path(user_data_dir("FileTools", appauthor=False))
+            db_dir.mkdir(parents=True, exist_ok=True)
+            db_path = db_dir / "filetools_dedup.db"
             db_url = f"sqlite:///{db_path}"
 
         self._engine = create_engine(

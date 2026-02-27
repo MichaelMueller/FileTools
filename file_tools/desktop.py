@@ -44,10 +44,14 @@ def _find_port(host: str, start: int, attempts: int) -> int:
     raise RuntimeError(msg)
 
 
+_uvicorn_server: uvicorn.Server | None = None
+
+
 def _run_server(host: str, port: int) -> None:
+    global _uvicorn_server  # noqa: PLW0603
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")
-    server = uvicorn.Server(config)
-    server.run()
+    _uvicorn_server = uvicorn.Server(config)
+    _uvicorn_server.run()
 
 
 def run_desktop(
@@ -173,6 +177,13 @@ def run_desktop(
         on_ready()
 
     webview.start(gui="edgechromium", private_mode=False)
+
+    # Ensure the uvicorn server shuts down when the window closes.
+    if _uvicorn_server is not None:
+        _uvicorn_server.should_exit = True
+    # os._exit bypasses atexit handlers and thread join waits that can hang.
+    import os  # noqa: PLC0415
+    os._exit(0)
 
 
 if __name__ == "__main__":  # pragma: no cover

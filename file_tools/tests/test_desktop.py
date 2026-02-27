@@ -86,6 +86,7 @@ def test_run_desktop_starts_server_and_webview() -> None:
         patch("file_tools.desktop.threading.Thread", mock_thread_cls),
         patch("file_tools.desktop.time.sleep") as mock_sleep,
         patch("file_tools.desktop._find_port", return_value=9876),
+        patch("os._exit") as mock_exit,
     ):
         from file_tools.desktop import run_desktop
 
@@ -122,9 +123,12 @@ def test_run_desktop_starts_server_and_webview() -> None:
             gui="edgechromium", private_mode=False,
         )
 
+        # os._exit(0) called to ensure clean shutdown
+        mock_exit.assert_called_once_with(0)
+
 
 def test_run_server_uses_uvicorn() -> None:
-    """_run_server configures and runs uvicorn."""
+    """_run_server configures and runs uvicorn and stores server globally."""
     mock_server = MagicMock()
     mock_config_cls = MagicMock()
     mock_server_cls = MagicMock(return_value=mock_server)
@@ -133,6 +137,7 @@ def test_run_server_uses_uvicorn() -> None:
         patch("file_tools.desktop.uvicorn.Config", mock_config_cls),
         patch("file_tools.desktop.uvicorn.Server", mock_server_cls),
     ):
+        import file_tools.desktop as desktop_mod
         from file_tools.desktop import _run_server, app
 
         _run_server("127.0.0.1", 8765)
@@ -140,3 +145,4 @@ def test_run_server_uses_uvicorn() -> None:
     mock_config_cls.assert_called_once_with(app, host="127.0.0.1", port=8765, log_level="warning")
     mock_server_cls.assert_called_once_with(mock_config_cls.return_value)
     mock_server.run.assert_called_once()
+    assert desktop_mod._uvicorn_server is mock_server

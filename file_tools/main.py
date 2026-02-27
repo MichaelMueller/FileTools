@@ -24,11 +24,12 @@ from file_tools.tools.pdf_tools import (
     split_pdf,
     split_pdf_to_images,
 )
+from file_tools.tools.pdf2dcm import Pdf2Dcm
 
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="FileTools", version="1.2.0")
+app = FastAPI(title="FileTools", version="1.3.0")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -436,22 +437,296 @@ async def date_sort_execute(body: dict) -> JSONResponse:
 # GPS Sorter
 # ---------------------------------------------------------------------------
 
-_gps_db_url: str | None = None  # let GpsSorter use its default (temp dir)
+_gps_db_url: str | None = None  # let GpsSorter use its default
 
 
-@app.get("/api/gps-sort/aliases")
-async def gps_sort_aliases_list() -> JSONResponse:
-    """Return all persisted region aliases."""
+# ---------------------------------------------------------------------------
+# PDF 2 DCM
+# ---------------------------------------------------------------------------
+
+_pdf2dcm_db_url: str | None = None  # let Pdf2Dcm use its default
+
+
+@app.get("/api/pdf2dcm/tags")
+async def pdf2dcm_tags() -> JSONResponse:
+    """Return the list of common DICOM tags for the frontend dropdown."""
+    return JSONResponse(content={"tags": Pdf2Dcm.common_tags()})
+
+
+@app.get("/api/pdf2dcm/configs")
+async def pdf2dcm_configs() -> JSONResponse:
+    """Return all saved tag configurations."""
+    p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
+    return JSONResponse(content={"configs": p.get_configs()})
+
+
+@app.post("/api/pdf2dcm/configs")
+async def pdf2dcm_save_config(body: dict) -> JSONResponse:
+    """Save or update a named tag configuration.
+
+    Body: ``{name: str, tags: {keyword: value, ...}}``
+    """
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required.")
+    tags = body.get("tags") or {}
+    p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
+    cfg = p.save_config(name, tags)
+    return JSONResponse(content=cfg)
+
+
+@app.delete("/api/pdf2dcm/configs/{config_id}")
+async def pdf2dcm_delete_config(config_id: int) -> JSONResponse:
+    """Delete a tag configuration by ID."""
+    p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
+    if not p.delete_config(config_id):
+        raise HTTPException(status_code=404, detail="Config not found.")
+    return JSONResponse(content={"deleted": config_id})
+
+@app.post("/api/pdf2dcm/convert")
+async def pdf2dcm_convert(
+    pdf: Annotated[UploadFile, File()],
+    tags_json: Annotated[str, Form()] = "{}",
+    template: Annotated[UploadFile | None, File()] = None,
+) -> Response:
+    """Convert an uploaded PDF to a DICOM Encapsulated PDF.
+
+    ``tags_json`` is a JSON-encoded dict of keyword→value pairs.
+    ``template`` is an optional DICOM file used as a dataset template.
+    """
+    import json as _json  # noqa: PLC0415
+    import tempfile as _tf  # noqa: PLC0415
+
+    # Parse tags
+    try:
+        tags: dict[str, str] = _json.loads(tags_json) if tags_json else {}
+    except _json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid tags JSON: {exc}") from exc
+
+    # Save PDF to temp file
+    pdf_data = await pdf.read()
+    if not pdf_data:
+        raise HTTPException(status_code=422, detail="Empty PDF file.")
+
+    pdf_suffix = Path(pdf.filename or "upload.pdf").suffix or ".pdf"
+    pdf_stem = Path(pdf.filename or "upload").stem
+    with _tf.NamedTemporaryFile(delete=False, suffix=pdf_suffix, prefix=f"{pdf_stem}_") as tmp_pdf:
+        tmp_pdf.write(pdf_data)
+        tmp_pdf_path = Path(tmp_pdf.name)
+
+    # Save template to temp file if provided
+    tmp_tmpl_path: Path | None = None
+    if template is not None:
+        tmpl_data = await template.read()
+        if tmpl_data:
+            with _tf.NamedTemporaryFile(delete=False, suffix=".dcm", prefix="tmpl_") as tmp_tmpl:
+                tmp_tmpl.write(tmpl_data)
+                tmp_tmpl_path = Path(tmp_tmpl.name)
+
+    try:
+        dcm_bytes = Pdf2Dcm.convert(
+            tmp_pdf_path,
+            template_path=tmp_tmpl_path,
+            tags=tags,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
+    finally:
+        tmp_pdf_path.unlink(missing_ok=True)
+        if tmp_tmpl_path:
+            tmp_tmpl_path.unlink(missing_ok=True)
+
+    out_name = f"{pdf_stem}.dcm"
+    return Response(
+        content=dcm_bytes,
+        media_type="application/dicom",
+        headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+    )
+
+
+@app.post("/api/pdf2dcm/convert-desktop")
+async def pdf2dcm_convert_desktop(body: dict) -> JSONResponse:
+    """Convert a PDF on disk to DICOM and save to *output_path*.
+
+    Body: ``{pdf_path, output_path, template_path?, tags?}``
+    """
+    pdf_path = body.get("pdf_path", "")
+    output_path = body.get("output_path", "")
+    template_path = body.get("template_path") or None
+    tags = body.get("tags") or {}
+
+    if not pdf_path:
+        raise HTTPException(status_code=422, detail="pdf_path is required.")
+    if not output_path:
+        raise HTTPException(status_code=422, detail="output_path is required.")
+
+    try:
+        dcm_bytes = Pdf2Dcm.convert(
+            Path(pdf_path),
+            template_path=Path(template_path) if template_path else None,
+            tags=tags,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
+
+    dest = Path(output_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(dcm_bytes)
+    return JSONResponse(content={"saved": str(dest)})
+
+
+# ---------------------------------------------------------------------------
+# GPS Sorter
+# ---------------------------------------------------------------------------
+
+# ── Regions ───────────────────────────────────────────────────────────────
+
+
+@app.get("/api/gps-sort/regions")
+async def gps_sort_regions_list() -> JSONResponse:
+    """Return all regions with their assigned areas."""
     sorter = GpsSorter(db_url=_gps_db_url)
-    return JSONResponse(content={"aliases": sorter.get_aliases()})
+    return JSONResponse(content={"regions": sorter.get_regions()})
 
 
-@app.delete("/api/gps-sort/aliases")
-async def gps_sort_aliases_delete(body: dict) -> JSONResponse:
-    """Delete a region alias by id."""
+@app.post("/api/gps-sort/regions")
+async def gps_sort_regions_create(body: dict) -> JSONResponse:
+    """Create a new region."""
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Region name is required.")
     sorter = GpsSorter(db_url=_gps_db_url)
-    sorter.delete_alias(body.get("id", 0))
+    result = sorter.add_region(name)
+    return JSONResponse(content={"region": result})
+
+
+@app.put("/api/gps-sort/regions")
+async def gps_sort_regions_update(body: dict) -> JSONResponse:
+    """Update a region (rename)."""
+    region_id = body.get("id")
+    if not region_id:
+        raise HTTPException(status_code=422, detail="Region id is required.")
+    name = body.get("name")
+    sorter = GpsSorter(db_url=_gps_db_url)
+    result = sorter.update_region(int(region_id), name=name)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Region not found.")
+    return JSONResponse(content={"region": result})
+
+
+@app.delete("/api/gps-sort/regions")
+async def gps_sort_regions_delete(body: dict) -> JSONResponse:
+    """Delete a region. Areas become unassigned."""
+    sorter = GpsSorter(db_url=_gps_db_url)
+    sorter.delete_region(body.get("id", 0))
     return JSONResponse(content={"deleted": True})
+
+
+# ── Areas ─────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/gps-sort/areas")
+async def gps_sort_areas_list() -> JSONResponse:
+    """Return all areas."""
+    sorter = GpsSorter(db_url=_gps_db_url)
+    return JSONResponse(content={"areas": sorter.get_areas()})
+
+
+@app.post("/api/gps-sort/areas")
+async def gps_sort_areas_create(body: dict) -> JSONResponse:
+    """Create a new area.
+
+    Accepts ``geocoded_name``, ``lat``/``lon`` (or ``url``),
+    ``radius_km``, ``region_id``.
+    """
+    geo_name = body.get("geocoded_name", "").strip()
+    if not geo_name:
+        raise HTTPException(status_code=422, detail="Area name is required.")
+
+    url = body.get("url", "").strip() if body.get("url") else ""
+    lat = body.get("lat")
+    lon = body.get("lon")
+
+    sorter = GpsSorter(db_url=_gps_db_url)
+
+    if url:
+        parsed = GpsSorter.parse_google_maps_url(url)
+        if parsed is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Could not extract coordinates from URL.",
+            )
+        lat, lon = parsed
+
+    if lat is None or lon is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Coordinates (lat/lon) or a Google Maps URL are required.",
+        )
+
+    radius_km = float(body.get("radius_km", 5.0))
+    region_id = body.get("region_id")
+    if region_id is not None:
+        region_id = int(region_id)
+    result = sorter.add_area(
+        geo_name, float(lat), float(lon),
+        radius_km=radius_km, region_id=region_id,
+    )
+    return JSONResponse(content={"area": result})
+
+
+@app.put("/api/gps-sort/areas")
+async def gps_sort_areas_update(body: dict) -> JSONResponse:
+    """Update an existing area."""
+    area_id = body.get("id")
+    if not area_id:
+        raise HTTPException(status_code=422, detail="Area id is required.")
+
+    sorter = GpsSorter(db_url=_gps_db_url)
+    kwargs: dict = {}
+    if "geocoded_name" in body:
+        kwargs["geocoded_name"] = body["geocoded_name"]
+    for key in ("lat", "lon", "radius_km"):
+        if key in body and body[key] is not None:
+            kwargs[key] = float(body[key])
+    if "region_id" in body:
+        val = body["region_id"]
+        kwargs["region_id"] = int(val) if val is not None else None
+    result = sorter.update_area(int(area_id), **kwargs)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Area not found.")
+    return JSONResponse(content={"area": result})
+
+
+@app.delete("/api/gps-sort/areas")
+async def gps_sort_areas_delete(body: dict) -> JSONResponse:
+    """Delete an area by id."""
+    sorter = GpsSorter(db_url=_gps_db_url)
+    sorter.delete_area(body.get("id", 0))
+    return JSONResponse(content={"deleted": True})
+
+
+# ── Coordinate parsing ───────────────────────────────────────────────────
+
+
+@app.post("/api/gps-sort/parse-url")
+async def gps_sort_parse_url(body: dict) -> JSONResponse:
+    """Parse a Google Maps URL and return extracted coordinates."""
+    url = body.get("url", "")
+    result = GpsSorter.parse_google_maps_url(url)
+    if result is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract coordinates from the provided URL.",
+        )
+    return JSONResponse(content={"lat": result[0], "lon": result[1]})
+
+
+# ── Preview / reclassify / execute ────────────────────────────────────────
 
 
 @app.post("/api/gps-sort/preview")
@@ -475,18 +750,34 @@ async def gps_sort_preview(body: dict) -> JSONResponse:
     return JSONResponse(content=result)
 
 
+@app.post("/api/gps-sort/reclassify")
+async def gps_sort_reclassify(body: dict) -> JSONResponse:
+    """Re-evaluate an existing plan against current areas/regions."""
+    plan = body.get("plan", [])
+    if not plan:
+        raise HTTPException(status_code=422, detail="Empty plan.")
+
+    sorter = GpsSorter(db_url=_gps_db_url)
+    try:
+        result = sorter.reclassify(plan)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return JSONResponse(content=result)
+
+
 @app.post("/api/gps-sort/execute")
 async def gps_sort_execute(body: dict) -> JSONResponse:
     """Execute a previously previewed GPS-sort plan (move files)."""
     plan = body.get("plan", [])
     if not plan:
-        raise HTTPException(status_code=422, detail="Empty plan \u2013 nothing to move.")
+        raise HTTPException(status_code=422, detail="Empty plan – nothing to move.")
 
-    trip_names = body.get("trip_names", {})
+    no_gps_name = body.get("no_gps_name") or None
 
     sorter = GpsSorter(db_url=_gps_db_url)
     try:
-        moved = sorter.execute(plan, trip_names=trip_names)
+        moved = sorter.execute(plan, no_gps_name=no_gps_name)
     except PermissionError as exc:
         raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
     except OSError as exc:
@@ -512,36 +803,57 @@ async def mode_check() -> JSONResponse:
 
 
 @app.get("/api/dialog/files")
-async def dialog_files(multiple: bool = True) -> JSONResponse:
-    """Open a native file-open dialog (desktop / pywebview mode only)."""
+async def dialog_files(multiple: bool = True, file_types: str = "") -> JSONResponse:
+    """Open a native file-open dialog (desktop / pywebview mode only).
+
+    *file_types* is a semicolon-separated list of filter strings.
+    If empty, defaults to PDF + Image + All.
+    """
     if _webview_window is None:
         raise HTTPException(status_code=503, detail="Not running in desktop mode.")
     import webview as _wv  # noqa: PLC0415
 
-    result = _webview_window.create_file_dialog(
-        _wv.OPEN_DIALOG,
-        allow_multiple=multiple,
-        file_types=(
+    if file_types:
+        ft = tuple(file_types.split(";"))
+    else:
+        ft = (
             "Supported Files (*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp)",
             "PDF Files (*.pdf)",
             "Image Files (*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp)",
             "All Files (*.*)",
-        ),
+        )
+
+    result = _webview_window.create_file_dialog(
+        _wv.FileDialog.OPEN,
+        allow_multiple=multiple,
+        file_types=ft,
     )
     return JSONResponse(content={"files": list(result) if result else []})
 
 
 @app.get("/api/dialog/save")
-async def dialog_save(filename: str = "merged.pdf") -> JSONResponse:
-    """Open a native save-file dialog (desktop / pywebview mode only)."""
+async def dialog_save(
+    filename: str = "merged.pdf",
+    file_types: str = "",
+) -> JSONResponse:
+    """Open a native save-file dialog (desktop / pywebview mode only).
+
+    *file_types* is a semicolon-separated list of filter strings.
+    If empty, defaults to PDF + All.
+    """
     if _webview_window is None:
         raise HTTPException(status_code=503, detail="Not running in desktop mode.")
     import webview as _wv  # noqa: PLC0415
 
+    if file_types:
+        ft = tuple(file_types.split(";"))
+    else:
+        ft = ("PDF Files (*.pdf)", "All Files (*.*)")
+
     result = _webview_window.create_file_dialog(
-        _wv.SAVE_DIALOG,
+        _wv.FileDialog.SAVE,
         save_filename=filename,
-        file_types=("PDF Files (*.pdf)", "All Files (*.*)"),
+        file_types=ft,
     )
     path = result if isinstance(result, str) else (result[0] if result else None)
     return JSONResponse(content={"path": path})
@@ -617,7 +929,7 @@ async def dialog_directory(default_dir: str = "") -> JSONResponse:
     if default_dir and Path(default_dir).is_dir():
         kwargs["directory"] = default_dir
 
-    result = _webview_window.create_file_dialog(_wv.FOLDER_DIALOG, **kwargs)
+    result = _webview_window.create_file_dialog(_wv.FileDialog.FOLDER, **kwargs)
     directory = result[0] if result else None
     return JSONResponse(content={"directory": directory})
 

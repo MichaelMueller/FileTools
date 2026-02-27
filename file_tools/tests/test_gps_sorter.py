@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from file_tools.tools.gps_sorter import GpsSorter, RegionAliasRow
+from file_tools.tools.gps_sorter import AreaRow, GpsSorter, RegionRow
 
 
 # ---------------------------------------------------------------------------
@@ -92,13 +92,10 @@ class TestHaversine:
         assert GpsSorter._haversine_km(48.0, 11.0, 48.0, 11.0) == 0.0
 
     def test_known_distance(self) -> None:
-        # Munich (48.1351, 11.5820) → Berlin (52.5200, 13.4050)
         dist = GpsSorter._haversine_km(48.1351, 11.5820, 52.5200, 13.4050)
-        # Should be ~ 504 km
         assert 490 < dist < 520
 
     def test_antipodal(self) -> None:
-        # Roughly opposite sides of earth → ~ 20000 km
         dist = GpsSorter._haversine_km(0, 0, 0, 180)
         assert abs(dist - math.pi * 6371) < 10
 
@@ -122,32 +119,24 @@ class TestGpsCoordinates:
         assert GpsSorter._gps_coordinates(jpg) is None
 
     def test_returns_none_when_exif_empty(self, tmp_path: Path) -> None:
-        """Image opens but getexif() returns empty → None."""
         from PIL import Image  # noqa: PLC0415
 
         img = Image.new("RGB", (1, 1))
         jpg = tmp_path / "empty_exif.jpg"
-        img.save(jpg)  # saved without any EXIF
-        # Patch getexif to return falsy to ensure branch is hit
+        img.save(jpg)
         with patch("PIL.Image.Image.getexif", return_value={}):
             assert GpsSorter._gps_coordinates(jpg) is None
 
     def test_extracts_gps_from_exif(self, tmp_path: Path) -> None:
-        """Create a JPEG with GPS EXIF and verify extraction."""
         from PIL import Image  # noqa: PLC0415
 
         img = Image.new("RGB", (1, 1))
         exif = img.getexif()
-
-        # Build GPS IFD
         gps_ifd = {
-            1: "N",  # GPSLatitudeRef
-            2: (48.0, 8.0, 30.0),  # GPSLatitude
-            3: "E",  # GPSLongitudeRef
-            4: (11.0, 34.0, 48.0),  # GPSLongitude
+            1: "N", 2: (48.0, 8.0, 30.0),
+            3: "E", 4: (11.0, 34.0, 48.0),
         }
         exif.get_ifd(0x8825).update(gps_ifd)
-
         jpg = tmp_path / "gps_photo.jpg"
         img.save(jpg, exif=exif.tobytes())
 
@@ -163,29 +152,21 @@ class TestGpsCoordinates:
         assert GpsSorter._gps_coordinates(jpg) is None
 
     def test_image_with_exif_but_no_gps_ifd(self, tmp_path: Path) -> None:
-        """Image has EXIF data but no GPS sub-IFD → None."""
         from PIL import Image  # noqa: PLC0415
 
         img = Image.new("RGB", (1, 1))
         exif = img.getexif()
-        # Add a non-GPS EXIF tag so exif is truthy
-        exif[0x0132] = "2025:01:01 00:00:00"  # DateTime
+        exif[0x0132] = "2025:01:01 00:00:00"
         jpg = tmp_path / "no_gps_ifd.jpg"
         img.save(jpg, exif=exif.tobytes())
         assert GpsSorter._gps_coordinates(jpg) is None
 
     def test_gps_ifd_with_missing_fields(self, tmp_path: Path) -> None:
-        """GPS IFD present but missing longitude → None."""
         from PIL import Image  # noqa: PLC0415
 
         img = Image.new("RGB", (1, 1))
         exif = img.getexif()
-        # Only latitude, no longitude
-        gps_ifd = {
-            1: "N",
-            2: (48.0, 8.0, 30.0),
-            # Missing keys 3 and 4
-        }
+        gps_ifd = {1: "N", 2: (48.0, 8.0, 30.0)}
         exif.get_ifd(0x8825).update(gps_ifd)
         jpg = tmp_path / "partial_gps.jpg"
         img.save(jpg, exif=exif.tobytes())
@@ -193,33 +174,41 @@ class TestGpsCoordinates:
 
 
 # ---------------------------------------------------------------------------
-# _match_alias
+# _match_area
 # ---------------------------------------------------------------------------
 
 
-class TestMatchAlias:
-    """Tests for GpsSorter._match_alias."""
+class TestMatchArea:
+    """Tests for GpsSorter._match_area."""
 
     def test_within_radius(self) -> None:
-        aliases = [{"alias": "Home", "lat": 48.135, "lon": 11.582, "radius_km": 5.0}]
-        result = GpsSorter._match_alias(48.136, 11.583, aliases)
-        assert result == "Home"
+        areas = [{"id": 1, "geocoded_name": "DE/Munich",
+                  "lat": 48.135, "lon": 11.582, "radius_km": 5.0,
+                  "region_id": None}]
+        result = GpsSorter._match_area(48.136, 11.583, areas)
+        assert result is not None
+        assert result["id"] == 1
 
     def test_outside_radius(self) -> None:
-        aliases = [{"alias": "Home", "lat": 48.135, "lon": 11.582, "radius_km": 0.001}]
-        result = GpsSorter._match_alias(52.52, 13.405, aliases)
+        areas = [{"id": 1, "geocoded_name": "Home",
+                  "lat": 48.135, "lon": 11.582, "radius_km": 0.001,
+                  "region_id": None}]
+        result = GpsSorter._match_area(52.52, 13.405, areas)
         assert result is None
 
-    def test_empty_aliases(self) -> None:
-        assert GpsSorter._match_alias(48.0, 11.0, []) is None
+    def test_empty_areas(self) -> None:
+        assert GpsSorter._match_area(48.0, 11.0, []) is None
 
     def test_closest_wins(self) -> None:
-        aliases = [
-            {"alias": "Far", "lat": 48.2, "lon": 11.7, "radius_km": 50.0},
-            {"alias": "Near", "lat": 48.135, "lon": 11.582, "radius_km": 50.0},
+        areas = [
+            {"id": 1, "geocoded_name": "Far", "lat": 48.2, "lon": 11.7,
+             "radius_km": 50.0, "region_id": None},
+            {"id": 2, "geocoded_name": "Near", "lat": 48.135, "lon": 11.582,
+             "radius_km": 50.0, "region_id": None},
         ]
-        result = GpsSorter._match_alias(48.136, 11.583, aliases)
-        assert result == "Near"
+        result = GpsSorter._match_area(48.136, 11.583, areas)
+        assert result is not None
+        assert result["id"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +227,58 @@ class TestReverseGeocode:
         result = GpsSorter._reverse_geocode(coords)
         assert len(result) == 2
         for folder in result:
-            assert "/" in folder  # country/city format
+            assert "/" in folder
 
     def test_known_city(self) -> None:
-        # Munich
         result = GpsSorter._reverse_geocode([(48.1351, 11.5820)])
         assert len(result) == 1
-        # Should contain "DE" for Germany
         assert "DE" in result[0] or "Munich" in result[0] or "München" in result[0]
+
+
+# ---------------------------------------------------------------------------
+# parse_google_maps_url
+# ---------------------------------------------------------------------------
+
+
+class TestParseGoogleMapsUrl:
+    """Tests for GpsSorter.parse_google_maps_url."""
+
+    def test_at_style(self) -> None:
+        url = "https://www.google.com/maps/@48.1351,11.5820,15z"
+        result = GpsSorter.parse_google_maps_url(url)
+        assert result is not None
+        assert abs(result[0] - 48.1351) < 1e-4
+        assert abs(result[1] - 11.5820) < 1e-4
+
+    def test_query_style(self) -> None:
+        url = "https://www.google.com/maps?q=48.1351,11.5820"
+        result = GpsSorter.parse_google_maps_url(url)
+        assert result is not None
+
+    def test_ll_style(self) -> None:
+        url = "https://maps.google.com/?ll=48.1351,11.5820"
+        result = GpsSorter.parse_google_maps_url(url)
+        assert result is not None
+
+    def test_place_style(self) -> None:
+        url = "https://www.google.com/maps/place/Munich/@48.1351,11.5820,14z"
+        result = GpsSorter.parse_google_maps_url(url)
+        assert result is not None
+
+    def test_plain_coords(self) -> None:
+        result = GpsSorter.parse_google_maps_url("48.1351,11.5820")
+        assert result is not None
+
+    def test_negative_coords(self) -> None:
+        result = GpsSorter.parse_google_maps_url("-33.8688,151.2093")
+        assert result is not None
+        assert abs(result[0] - (-33.8688)) < 1e-4
+
+    def test_invalid_returns_none(self) -> None:
+        assert GpsSorter.parse_google_maps_url("not a url") is None
+
+    def test_empty_returns_none(self) -> None:
+        assert GpsSorter.parse_google_maps_url("") is None
 
 
 # ---------------------------------------------------------------------------
@@ -294,72 +327,168 @@ class TestFileTimestamp:
 
 
 # ---------------------------------------------------------------------------
-# Region alias persistence
+# Region CRUD
 # ---------------------------------------------------------------------------
 
 
-class TestAliasPersistence:
-    """Tests for DB-backed region alias persistence."""
+class TestRegionCrud:
+    """Tests for region create / read / update / delete."""
 
-    def test_get_aliases_empty(self, sorter: GpsSorter) -> None:
-        assert sorter.get_aliases() == []
+    def test_get_regions_empty(self, sorter: GpsSorter) -> None:
+        assert sorter.get_regions() == []
 
-    def test_save_and_get_alias(self, sorter: GpsSorter) -> None:
-        sorter._save_alias("Home", 48.135, 11.582, radius_km=2.0)
-        aliases = sorter.get_aliases()
-        assert len(aliases) == 1
-        assert aliases[0]["alias"] == "Home"
-        assert aliases[0]["lat"] == 48.135
-        assert aliases[0]["lon"] == 11.582
-        assert aliases[0]["radius_km"] == 2.0
-        assert "id" in aliases[0]
+    def test_add_region(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Home")
+        assert r["name"] == "Home"
+        assert "id" in r
+        assert r["areas"] == []
 
-    def test_get_aliases_ordered(self, sorter: GpsSorter) -> None:
-        sorter._save_alias("Work", 48.2, 11.6, radius_km=1.0)
-        sorter._save_alias("Home", 1.0, 2.0, radius_km=1.0)
-        aliases = sorter.get_aliases()
-        assert len(aliases) == 2
-        assert aliases[0]["alias"] == "Home"
-        assert aliases[1]["alias"] == "Work"
+    def test_get_regions_returns_added(self, sorter: GpsSorter) -> None:
+        sorter.add_region("Alpha")
+        sorter.add_region("Beta")
+        regs = sorter.get_regions()
+        assert len(regs) == 2
+        names = [r["name"] for r in regs]
+        assert "Alpha" in names
+        assert "Beta" in names
 
-    def test_save_alias_updates_nearby(self, sorter: GpsSorter) -> None:
-        """Saving an alias near an existing one updates it."""
-        sorter._save_alias("Old Name", 48.135, 11.582, radius_km=5.0)
-        # Same location, new name
-        sorter._save_alias("New Name", 48.136, 11.583, radius_km=5.0)
-        aliases = sorter.get_aliases()
-        assert len(aliases) == 1
-        assert aliases[0]["alias"] == "New Name"
+    def test_update_region(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Old")
+        updated = sorter.update_region(r["id"], name="New")
+        assert updated is not None
+        assert updated["name"] == "New"
 
-    def test_save_alias_creates_new_when_far(self, sorter: GpsSorter) -> None:
-        """Saving an alias far from any existing creates a new entry."""
-        sorter._save_alias("Home", 48.135, 11.582, radius_km=1.0)
-        sorter._save_alias("Dubai", 25.2, 55.3, radius_km=1.0)
-        aliases = sorter.get_aliases()
-        assert len(aliases) == 2
+    def test_update_region_nonexistent(self, sorter: GpsSorter) -> None:
+        assert sorter.update_region(9999, name="X") is None
 
-    def test_delete_alias(self, sorter: GpsSorter) -> None:
-        sorter._save_alias("Tmp", 0.0, 0.0, radius_km=1.0)
-        aliases = sorter.get_aliases()
-        sorter.delete_alias(aliases[0]["id"])
-        assert sorter.get_aliases() == []
+    def test_delete_region(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("TMP")
+        sorter.delete_region(r["id"])
+        assert sorter.get_regions() == []
+
+    def test_delete_region_unassigns_areas(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Home")
+        sorter.add_area("DE/Munich", 48.135, 11.582, region_id=r["id"])
+        sorter.delete_region(r["id"])
+        areas = sorter.get_areas()
+        assert len(areas) == 1
+        assert areas[0]["region_id"] is None
 
     def test_delete_nonexistent_is_noop(self, sorter: GpsSorter) -> None:
-        sorter.delete_alias(9999)  # should not raise
+        sorter.delete_region(9999)  # should not raise
 
-    def test_alias_to_dict(self) -> None:
-        row = RegionAliasRow(
-            id=7, alias="Test", lat=1.5, lon=2.5, radius_km=3.0,
-        )
-        d = GpsSorter._alias_to_dict(row)
-        assert d == {
-            "id": 7, "alias": "Test",
-            "lat": 1.5, "lon": 2.5, "radius_km": 3.0,
-        }
+    def test_get_regions_includes_areas(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Home")
+        sorter.add_area("DE/Munich", 48.135, 11.582, region_id=r["id"])
+        sorter.add_area("DE/Augsburg", 48.37, 10.9, region_id=r["id"])
+        regs = sorter.get_regions()
+        assert len(regs) == 1
+        assert len(regs[0]["areas"]) == 2
 
 
 # ---------------------------------------------------------------------------
-# preview (with trip detection)
+# Area CRUD
+# ---------------------------------------------------------------------------
+
+
+class TestAreaCrud:
+    """Tests for area create / read / update / delete."""
+
+    def test_get_areas_empty(self, sorter: GpsSorter) -> None:
+        assert sorter.get_areas() == []
+
+    def test_add_area(self, sorter: GpsSorter) -> None:
+        a = sorter.add_area("DE/Munich", 48.135, 11.582)
+        assert a["geocoded_name"] == "DE/Munich"
+        assert a["lat"] == 48.135
+        assert a["lon"] == 11.582
+        assert a["radius_km"] == 5.0
+        assert a["region_id"] is None
+        assert "id" in a
+
+    def test_add_area_with_region(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Home")
+        a = sorter.add_area("DE/Munich", 48.135, 11.582, region_id=r["id"])
+        assert a["region_id"] == r["id"]
+
+    def test_add_area_custom_radius(self, sorter: GpsSorter) -> None:
+        a = sorter.add_area("DE/Munich", 48.135, 11.582, radius_km=10.0)
+        assert a["radius_km"] == 10.0
+
+    def test_get_areas_returns_added(self, sorter: GpsSorter) -> None:
+        sorter.add_area("A", 1.0, 2.0)
+        sorter.add_area("B", 3.0, 4.0)
+        areas = sorter.get_areas()
+        assert len(areas) == 2
+
+    def test_update_area_name(self, sorter: GpsSorter) -> None:
+        a = sorter.add_area("Old", 48.0, 11.0)
+        updated = sorter.update_area(a["id"], geocoded_name="New")
+        assert updated is not None
+        assert updated["geocoded_name"] == "New"
+        assert updated["lat"] == 48.0  # unchanged
+
+    def test_update_area_coords(self, sorter: GpsSorter) -> None:
+        a = sorter.add_area("Place", 48.0, 11.0)
+        updated = sorter.update_area(a["id"], lat=50.0, lon=12.0)
+        assert updated is not None
+        assert updated["lat"] == 50.0
+        assert updated["lon"] == 12.0
+
+    def test_update_area_radius(self, sorter: GpsSorter) -> None:
+        a = sorter.add_area("Place", 48.0, 11.0, radius_km=5.0)
+        updated = sorter.update_area(a["id"], radius_km=15.0)
+        assert updated is not None
+        assert updated["radius_km"] == 15.0
+
+    def test_update_area_assign_region(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Home")
+        a = sorter.add_area("DE/Munich", 48.135, 11.582)
+        updated = sorter.update_area(a["id"], region_id=r["id"])
+        assert updated is not None
+        assert updated["region_id"] == r["id"]
+
+    def test_update_area_unassign_region(self, sorter: GpsSorter) -> None:
+        r = sorter.add_region("Home")
+        a = sorter.add_area("DE/Munich", 48.135, 11.582, region_id=r["id"])
+        updated = sorter.update_area(a["id"], region_id=None)
+        assert updated is not None
+        assert updated["region_id"] is None
+
+    def test_update_area_nonexistent(self, sorter: GpsSorter) -> None:
+        assert sorter.update_area(9999, geocoded_name="X") is None
+
+    def test_delete_area(self, sorter: GpsSorter) -> None:
+        a = sorter.add_area("TMP", 0.0, 0.0)
+        sorter.delete_area(a["id"])
+        assert sorter.get_areas() == []
+
+    def test_delete_area_nonexistent_is_noop(self, sorter: GpsSorter) -> None:
+        sorter.delete_area(9999)
+
+    def test_area_to_dict(self) -> None:
+        row = AreaRow(
+            id=7, geocoded_name="DE/Munich",
+            lat=48.135, lon=11.582, radius_km=3.0, region_id=None,
+        )
+        d = GpsSorter._area_to_dict(row)
+        assert d == {
+            "id": 7, "geocoded_name": "DE/Munich",
+            "lat": 48.135, "lon": 11.582,
+            "radius_km": 3.0, "region_id": None,
+        }
+
+    def test_area_to_dict_with_region(self) -> None:
+        row = AreaRow(
+            id=8, geocoded_name="DE/Munich",
+            lat=48.135, lon=11.582, radius_km=3.0, region_id=2,
+        )
+        d = GpsSorter._area_to_dict(row)
+        assert d["region_id"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Preview
 # ---------------------------------------------------------------------------
 
 
@@ -382,11 +511,11 @@ class TestPreview:
             assert entry["group"] == "no_gps"
             assert entry["lat"] is None
 
-    def test_alias_match_from_db(
+    def test_existing_area_match(
         self, sorter: GpsSorter, photo_dir: Path,
     ) -> None:
-        """Photos near a saved alias are classified as 'location'."""
-        sorter._save_alias("Home", 48.135, 11.582, radius_km=50.0)
+        """Photos near a saved area (unassigned) are classified as 'area'."""
+        sorter.add_area("Home", 48.135, 11.582, radius_km=50.0)
         with (
             patch.object(
                 GpsSorter, "_gps_coordinates", return_value=(48.136, 11.583),
@@ -397,12 +526,30 @@ class TestPreview:
         for entry in result["plan"]:
             assert entry["folder"] == "Home"
             assert entry["location_name"] == "Home"
-            assert entry["group"] == "location"
+            assert entry["group"] == "area"
 
-    def test_trip_detection_creates_trips(
+    def test_area_with_region_match(
         self, sorter: GpsSorter, photo_dir: Path,
     ) -> None:
-        """Files with GPS but no alias → trip group."""
+        """Photos near an area assigned to a region -> group='region'."""
+        r = sorter.add_region("My Home")
+        sorter.add_area("DE/Munich", 48.135, 11.582,
+                        radius_km=50.0, region_id=r["id"])
+        with (
+            patch.object(
+                GpsSorter, "_gps_coordinates", return_value=(48.136, 11.583),
+            ),
+            patch.object(GpsSorter, "_file_timestamp", return_value=2000.0),
+        ):
+            result = sorter.preview(photo_dir)
+        for entry in result["plan"]:
+            assert entry["folder"] == "My Home"
+            assert entry["group"] == "region"
+
+    def test_new_area_created_for_unmatched(
+        self, sorter: GpsSorter, photo_dir: Path,
+    ) -> None:
+        """Files with GPS but no matching area -> new area auto-created."""
         with (
             patch.object(
                 GpsSorter, "_gps_coordinates", return_value=(25.2, 55.3),
@@ -415,76 +562,18 @@ class TestPreview:
             ),
         ):
             result = sorter.preview(photo_dir)
-        assert len(result["trips"]) == 1
-        trip = result["trips"][0]
-        assert trip["suggested_name"] == "AE/Dubai"
-        assert trip["file_count"] == 3
-        assert "centroid_lat" in trip
-        assert "centroid_lon" in trip
-        assert "radius_km" in trip
+        assert len(result["new_areas"]) == 1
+        new_area = result["new_areas"][0]
+        assert new_area["geocoded_name"] == "AE/Dubai"
         for entry in result["plan"]:
-            assert entry["group"] == "trip"
-            assert entry["trip_id"] == 1
+            assert entry["group"] == "area"
+            assert entry["area_id"] == new_area["id"]
             assert entry["folder"] == "AE/Dubai"
 
-    def test_alias_breaks_trip_sequence(
+    def test_distance_splits_clusters(
         self, sorter: GpsSorter, tmp_path: Path,
     ) -> None:
-        """Alias-matched photos break the trip sequence → two trips."""
-        root = tmp_path / "trips"
-        root.mkdir()
-        files = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"]
-        for f in files:
-            (root / f).write_text(f)
-
-        sorter._save_alias("Home", 48.135, 11.582, radius_km=50.0)
-
-        ts_counter = [0]
-
-        def fake_ts(path: Path) -> float:
-            ts_counter[0] += 1
-            return float(ts_counter[0] * 1000)
-
-        def fake_gps(path: Path) -> tuple[float, float] | None:
-            if path.name in ("a.jpg", "b.jpg"):
-                return (25.2, 55.3)  # Dubai
-            if path.name == "c.jpg":
-                return (48.136, 11.583)  # Home
-            if path.name in ("d.jpg", "e.jpg"):
-                return (52.52, 13.405)  # Berlin
-            return None
-
-        with (
-            patch.object(GpsSorter, "_gps_coordinates", side_effect=fake_gps),
-            patch.object(GpsSorter, "_file_timestamp", side_effect=fake_ts),
-            patch.object(
-                GpsSorter,
-                "_reverse_geocode",
-                return_value=[
-                    "AE/Dubai", "AE/Dubai",
-                    "DE/Berlin", "DE/Berlin",
-                ],
-            ),
-        ):
-            result = sorter.preview(root)
-
-        assert len(result["trips"]) == 2
-        groups = {e["file"]: e["group"] for e in result["plan"]}
-        assert groups["a.jpg"] == "trip"
-        assert groups["b.jpg"] == "trip"
-        assert groups["c.jpg"] == "location"
-        assert groups["d.jpg"] == "trip"
-        assert groups["e.jpg"] == "trip"
-
-        trip_ids = {e["file"]: e["trip_id"] for e in result["plan"]}
-        assert trip_ids["a.jpg"] == trip_ids["b.jpg"]
-        assert trip_ids["d.jpg"] == trip_ids["e.jpg"]
-        assert trip_ids["a.jpg"] != trip_ids["d.jpg"]
-
-    def test_distance_splits_trips(
-        self, sorter: GpsSorter, tmp_path: Path,
-    ) -> None:
-        """Photos far apart split into separate trips even if consecutive."""
+        """Photos far apart split into separate clusters/areas."""
         root = tmp_path / "split"
         root.mkdir()
         for f in ("a.jpg", "b.jpg", "c.jpg", "d.jpg"):
@@ -498,9 +587,9 @@ class TestPreview:
 
         def fake_gps(path: Path) -> tuple[float, float] | None:
             if path.name in ("a.jpg", "b.jpg"):
-                return (25.2, 55.3)   # Dubai
+                return (25.2, 55.3)
             if path.name in ("c.jpg", "d.jpg"):
-                return (52.52, 13.405)  # Berlin (>50 km from Dubai)
+                return (52.52, 13.405)
             return None
 
         with (
@@ -517,16 +606,16 @@ class TestPreview:
         ):
             result = sorter.preview(root)
 
-        assert len(result["trips"]) == 2
-        trip_ids = {e["file"]: e["trip_id"] for e in result["plan"]}
-        assert trip_ids["a.jpg"] == trip_ids["b.jpg"]
-        assert trip_ids["c.jpg"] == trip_ids["d.jpg"]
-        assert trip_ids["a.jpg"] != trip_ids["c.jpg"]
+        assert len(result["new_areas"]) == 2
+        area_ids = {e["file"]: e["area_id"] for e in result["plan"]}
+        assert area_ids["a.jpg"] == area_ids["b.jpg"]
+        assert area_ids["c.jpg"] == area_ids["d.jpg"]
+        assert area_ids["a.jpg"] != area_ids["c.jpg"]
 
-    def test_nearby_photos_stay_in_same_trip(
+    def test_nearby_photos_same_cluster(
         self, sorter: GpsSorter, tmp_path: Path,
     ) -> None:
-        """Photos close together remain in the same trip cluster."""
+        """Photos close together remain in the same area."""
         root = tmp_path / "close"
         root.mkdir()
         for f in ("a.jpg", "b.jpg", "c.jpg"):
@@ -538,7 +627,6 @@ class TestPreview:
             ts_counter[0] += 1
             return float(ts_counter[0] * 1000)
 
-        # All within ~10 km of each other in Dubai
         def fake_gps(path: Path) -> tuple[float, float] | None:
             if path.name == "a.jpg":
                 return (25.20, 55.30)
@@ -559,24 +647,85 @@ class TestPreview:
         ):
             result = sorter.preview(root)
 
-        assert len(result["trips"]) == 1
+        assert len(result["new_areas"]) == 1
         for entry in result["plan"]:
-            assert entry["trip_id"] == 1
+            assert entry["area_id"] == result["new_areas"][0]["id"]
+
+    def test_area_breaks_cluster_sequence(
+        self, sorter: GpsSorter, tmp_path: Path,
+    ) -> None:
+        """An area-matched photo breaks the cluster sequence."""
+        root = tmp_path / "mixed"
+        root.mkdir()
+        files = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"]
+        for f in files:
+            (root / f).write_text(f)
+
+        sorter.add_area("Home", 48.135, 11.582, radius_km=50.0)
+
+        ts_counter = [0]
+
+        def fake_ts(path: Path) -> float:
+            ts_counter[0] += 1
+            return float(ts_counter[0] * 1000)
+
+        def fake_gps(path: Path) -> tuple[float, float] | None:
+            if path.name in ("a.jpg", "b.jpg"):
+                return (25.2, 55.3)
+            if path.name == "c.jpg":
+                return (48.136, 11.583)
+            if path.name in ("d.jpg", "e.jpg"):
+                return (52.52, 13.405)
+            return None
+
+        with (
+            patch.object(GpsSorter, "_gps_coordinates", side_effect=fake_gps),
+            patch.object(GpsSorter, "_file_timestamp", side_effect=fake_ts),
+            patch.object(
+                GpsSorter,
+                "_reverse_geocode",
+                return_value=[
+                    "AE/Dubai", "AE/Dubai",
+                    "DE/Berlin", "DE/Berlin",
+                ],
+            ),
+        ):
+            result = sorter.preview(root)
+
+        assert len(result["new_areas"]) == 2
+        groups = {e["file"]: e["group"] for e in result["plan"]}
+        assert groups["c.jpg"] == "area"  # matched existing area
+        assert groups["a.jpg"] == "area"  # new area (Dubai)
+        assert groups["d.jpg"] == "area"  # new area (Berlin)
 
     def test_empty_directory(self, sorter: GpsSorter, empty_dir: Path) -> None:
         result = sorter.preview(empty_dir)
         assert result["plan"] == []
-        assert result["trips"] == []
+        assert result["new_areas"] == []
         assert result["total"] == 0
 
-    def test_skips_subdirectories(
+    def test_recursive_scanning(
         self, sorter: GpsSorter, dir_with_subdirs: Path,
     ) -> None:
+        """With recursive=True, files in subdirs are included."""
         with (
             patch.object(GpsSorter, "_gps_coordinates", return_value=None),
             patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
         ):
-            result = sorter.preview(dir_with_subdirs)
+            result = sorter.preview(dir_with_subdirs, recursive=True)
+        files = {e["file"] for e in result["plan"]}
+        assert "file.txt" in files
+        assert "nested.txt" in files
+
+    def test_non_recursive_scanning(
+        self, sorter: GpsSorter, dir_with_subdirs: Path,
+    ) -> None:
+        """With recursive=False, only direct children are included."""
+        with (
+            patch.object(GpsSorter, "_gps_coordinates", return_value=None),
+            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
+        ):
+            result = sorter.preview(dir_with_subdirs, recursive=False)
         assert len(result["plan"]) == 1
         assert result["plan"][0]["file"] == "file.txt"
 
@@ -595,12 +744,12 @@ class TestPreview:
         ):
             result = sorter.preview(photo_dir)
         assert "plan" in result
-        assert "trips" in result
+        assert "new_areas" in result
         assert "total" in result
         assert "no_gps_count" in result
         for entry in result["plan"]:
             for key in ("file", "source", "folder", "destination",
-                        "lat", "lon", "location_name", "group", "trip_id"):
+                        "lat", "lon", "location_name", "group", "area_id"):
                 assert key in entry
 
     def test_source_paths_are_absolute(
@@ -659,7 +808,6 @@ class TestPreview:
     def test_progress_callback_every_50(
         self, sorter: GpsSorter, tmp_path: Path,
     ) -> None:
-        """Progress callback fires every 50 files during scan."""
         root = tmp_path / "many"
         root.mkdir()
         for i in range(60):
@@ -674,14 +822,12 @@ class TestPreview:
                 root, progress_callback=lambda n: calls.append(n),
             )
         assert len(result["plan"]) == 60
-        assert 50 in calls  # intermediate callback at count == 50
+        assert 50 in calls
         assert calls[-1] == 60
 
     def test_mixed_gps_and_no_gps(
         self, sorter: GpsSorter, photo_dir: Path,
     ) -> None:
-        """Some files with GPS, some without."""
-
         def fake_gps(path: Path) -> tuple[float, float] | None:
             if path.name == "pic1.jpg":
                 return (48.1351, 11.5820)
@@ -706,7 +852,6 @@ class TestPreview:
     def test_no_timestamp_in_plan_entries(
         self, sorter: GpsSorter, photo_dir: Path,
     ) -> None:
-        """Raw timestamp must not leak into the plan entries."""
         with (
             patch.object(GpsSorter, "_gps_coordinates", return_value=None),
             patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
@@ -714,66 +859,6 @@ class TestPreview:
             result = sorter.preview(photo_dir)
         for entry in result["plan"]:
             assert "timestamp" not in entry
-
-    def test_trip_date_range(
-        self, sorter: GpsSorter, tmp_path: Path,
-    ) -> None:
-        """Trip metadata includes correct start/end dates."""
-        root = tmp_path / "dated"
-        root.mkdir()
-        (root / "a.jpg").write_text("a")
-        (root / "b.jpg").write_text("b")
-
-        counter = [0]
-
-        def fake_ts(path: Path) -> float:
-            counter[0] += 1
-            # a.jpg: 2025-03-10 00:00 UTC, b.jpg: 2025-03-17 00:00 UTC
-            if counter[0] <= 2:
-                return 1741564800.0 if counter[0] == 1 else 1742169600.0
-            return 1741564800.0
-
-        with (
-            patch.object(
-                GpsSorter, "_gps_coordinates", return_value=(25.0, 55.0),
-            ),
-            patch.object(GpsSorter, "_file_timestamp", side_effect=fake_ts),
-            patch.object(
-                GpsSorter,
-                "_reverse_geocode",
-                return_value=["AE/Dubai", "AE/Dubai"],
-            ),
-        ):
-            result = sorter.preview(root)
-
-        assert len(result["trips"]) == 1
-        trip = result["trips"][0]
-        assert trip["start_date"] == "2025-03-10"
-        assert trip["end_date"] == "2025-03-17"
-
-    def test_trip_suggested_name_most_common(
-        self, sorter: GpsSorter, tmp_path: Path,
-    ) -> None:
-        """Suggested name is the most common reverse-geocoded city."""
-        root = tmp_path / "multi"
-        root.mkdir()
-        for f in ("a.jpg", "b.jpg", "c.jpg"):
-            (root / f).write_text(f)
-
-        with (
-            patch.object(
-                GpsSorter, "_gps_coordinates", return_value=(25.0, 55.0),
-            ),
-            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
-            patch.object(
-                GpsSorter,
-                "_reverse_geocode",
-                return_value=["AE/Dubai", "AE/Abu Dhabi", "AE/Dubai"],
-            ),
-        ):
-            result = sorter.preview(root)
-
-        assert result["trips"][0]["suggested_name"] == "AE/Dubai"
 
     def test_no_gps_count(
         self, sorter: GpsSorter, photo_dir: Path,
@@ -786,10 +871,10 @@ class TestPreview:
         assert result["no_gps_count"] == 3
         assert result["total"] == 3
 
-    def test_trip_centroid_in_metadata(
+    def test_new_area_has_metadata(
         self, sorter: GpsSorter, photo_dir: Path,
     ) -> None:
-        """Trip metadata includes centroid and radius."""
+        """New areas include file_count, start_date, end_date."""
         with (
             patch.object(
                 GpsSorter, "_gps_coordinates", return_value=(25.2, 55.3),
@@ -802,14 +887,88 @@ class TestPreview:
             ),
         ):
             result = sorter.preview(photo_dir)
-        trip = result["trips"][0]
-        assert abs(trip["centroid_lat"] - 25.2) < 0.01
-        assert abs(trip["centroid_lon"] - 55.3) < 0.01
-        assert isinstance(trip["radius_km"], float)
+        assert len(result["new_areas"]) == 1
+        na = result["new_areas"][0]
+        assert na["file_count"] == 3
+        assert "start_date" in na
+        assert "end_date" in na
+
+    def test_existing_area_not_duplicated(
+        self, sorter: GpsSorter, photo_dir: Path,
+    ) -> None:
+        """If an area already exists near a new cluster, it is reused."""
+        sorter.add_area("AE/Dubai", 25.2, 55.3, radius_km=10.0)
+        with (
+            patch.object(
+                GpsSorter, "_gps_coordinates", return_value=(25.21, 55.31),
+            ),
+            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
+        ):
+            result = sorter.preview(photo_dir)
+        assert len(result["new_areas"]) == 0
+        assert len(sorter.get_areas()) == 1
 
 
 # ---------------------------------------------------------------------------
-# execute
+# Reclassify
+# ---------------------------------------------------------------------------
+
+
+class TestReclassify:
+    """Tests for GpsSorter.reclassify."""
+
+    def test_reclassify_matches_new_area(self, sorter: GpsSorter) -> None:
+        """Files get reassigned when an area is added."""
+        plan = [
+            {"file": "a.jpg", "source": "/tmp/a.jpg", "lat": 48.13, "lon": 11.58},
+            {"file": "b.jpg", "source": "/tmp/b.jpg", "lat": None, "lon": None},
+        ]
+        # No areas yet -> creates new area
+        with patch.object(GpsSorter, "_reverse_geocode", return_value=["DE/Munich"]):
+            result = sorter.reclassify(plan)
+        assert result["plan"][0]["group"] == "area"
+        assert result["plan"][1]["group"] == "no_gps"
+
+        # Add area for the coords -> still matches
+        sorter.add_area("Home", 48.13, 11.58, radius_km=5.0)
+        result2 = sorter.reclassify(plan)
+        assert result2["plan"][0]["group"] == "area"
+        assert result2["plan"][0]["folder"] == "Home"
+        assert result2["plan"][1]["group"] == "no_gps"
+
+    def test_reclassify_with_region(self, sorter: GpsSorter) -> None:
+        """After assigning area to region, reclassify uses region name."""
+        r = sorter.add_region("My Home")
+        sorter.add_area("DE/Munich", 48.13, 11.58,
+                        radius_km=5.0, region_id=r["id"])
+        plan = [
+            {"file": "a.jpg", "source": "/tmp/a.jpg", "lat": 48.13, "lon": 11.58},
+        ]
+        result = sorter.reclassify(plan)
+        assert result["plan"][0]["group"] == "region"
+        assert result["plan"][0]["folder"] == "My Home"
+
+    def test_reclassify_preserves_source(self, sorter: GpsSorter) -> None:
+        plan = [{"file": "x.jpg", "source": "/photos/x.jpg", "lat": 25.0, "lon": 55.0}]
+        with patch.object(GpsSorter, "_reverse_geocode", return_value=["AE/Dubai"]):
+            result = sorter.reclassify(plan)
+        assert result["plan"][0]["source"] == "/photos/x.jpg"
+        assert result["plan"][0]["file"] == "x.jpg"
+
+    def test_reclassify_sets_destinations(self, sorter: GpsSorter) -> None:
+        plan = [{"file": "a.jpg", "source": "/photos/a.jpg", "lat": 48.0, "lon": 11.0}]
+        sorter.add_area("Munich", 48.0, 11.0, radius_km=10.0)
+        result = sorter.reclassify(plan)
+        assert result["plan"][0]["destination"].endswith("Munich/a.jpg")
+
+    def test_reclassify_empty_plan(self, sorter: GpsSorter) -> None:
+        result = sorter.reclassify([])
+        assert result["plan"] == []
+        assert result["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Execute
 # ---------------------------------------------------------------------------
 
 
@@ -882,50 +1041,73 @@ class TestExecute:
             assert "file" in entry
             assert "folder" in entry
 
-    def test_trip_names_override(
-        self, sorter: GpsSorter, tmp_path: Path,
+    def test_no_gps_name_override(
+        self, sorter: GpsSorter, photo_dir: Path,
     ) -> None:
-        """User-provided trip names override suggested folder names."""
-        root = tmp_path / "rename"
-        root.mkdir()
-        (root / "a.jpg").write_text("a")
-        (root / "b.jpg").write_text("b")
-
         with (
-            patch.object(
-                GpsSorter, "_gps_coordinates", return_value=(25.0, 55.0),
-            ),
+            patch.object(GpsSorter, "_gps_coordinates", return_value=None),
             patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
-            patch.object(
-                GpsSorter,
-                "_reverse_geocode",
-                return_value=["AE/Dubai", "AE/Dubai"],
-            ),
         ):
-            result = sorter.preview(root)
-
-        trip_id = result["trips"][0]["id"]
-        moved = sorter.execute(
-            result["plan"],
-            trip_names={str(trip_id): "Dubai Holiday 2025"},
-        )
-        assert len(moved) == 2
+            result = sorter.preview(photo_dir)
+        plan = result["plan"]
+        moved = sorter.execute(plan, no_gps_name="Unsorted")
+        assert len(moved) == 3
         for entry in moved:
-            assert entry["folder"] == "Dubai Holiday 2025"
+            assert entry["folder"] == "Unsorted"
             assert Path(entry["destination"]).exists()
-            assert "Dubai Holiday 2025" in entry["destination"]
+            assert "Unsorted" in entry["destination"]
 
-    def test_trip_names_partial_override(
+    def test_no_gps_name_empty_uses_default(
+        self, sorter: GpsSorter, photo_dir: Path,
+    ) -> None:
+        with (
+            patch.object(GpsSorter, "_gps_coordinates", return_value=None),
+            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
+        ):
+            result = sorter.preview(photo_dir)
+        plan = result["plan"]
+        moved = sorter.execute(plan, no_gps_name="")
+        assert len(moved) == 3
+        for entry in moved:
+            assert entry["folder"] == "No GPS"
+
+    def test_no_gps_name_none_uses_default(
+        self, sorter: GpsSorter, photo_dir: Path,
+    ) -> None:
+        with (
+            patch.object(GpsSorter, "_gps_coordinates", return_value=None),
+            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
+        ):
+            result = sorter.preview(photo_dir)
+        plan = result["plan"]
+        moved = sorter.execute(plan, no_gps_name=None)
+        assert len(moved) == 3
+        for entry in moved:
+            assert entry["folder"] == "No GPS"
+
+    def test_no_gps_name_sanitised(
+        self, sorter: GpsSorter, photo_dir: Path,
+    ) -> None:
+        with (
+            patch.object(GpsSorter, "_gps_coordinates", return_value=None),
+            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
+        ):
+            result = sorter.preview(photo_dir)
+        plan = result["plan"]
+        moved = sorter.execute(plan, no_gps_name='Bad<>Name:"test"')
+        assert len(moved) == 3
+        for entry in moved:
+            assert "<" not in entry["folder"]
+            assert ">" not in entry["folder"]
+
+    def test_no_gps_name_with_regions(
         self, sorter: GpsSorter, tmp_path: Path,
     ) -> None:
-        """Only some trips renamed; others use suggested name."""
-        root = tmp_path / "partial"
+        """no_gps_name only affects no_gps entries, not area/region entries."""
+        root = tmp_path / "mixed"
         root.mkdir()
-        files = ["a.jpg", "b.jpg", "c.jpg"]
-        for f in files:
+        for f in ("a.jpg", "b.jpg", "c.jpg"):
             (root / f).write_text(f)
-
-        sorter._save_alias("Home", 48.135, 11.582, radius_km=50.0)
 
         counter = [0]
 
@@ -934,12 +1116,8 @@ class TestExecute:
             return float(counter[0] * 1000)
 
         def fake_gps(path: Path) -> tuple[float, float] | None:
-            if path.name == "a.jpg":
+            if path.name in ("a.jpg", "b.jpg"):
                 return (25.2, 55.3)
-            if path.name == "b.jpg":
-                return (48.136, 11.583)  # Home
-            if path.name == "c.jpg":
-                return (52.52, 13.405)
             return None
 
         with (
@@ -948,28 +1126,25 @@ class TestExecute:
             patch.object(
                 GpsSorter,
                 "_reverse_geocode",
-                return_value=["AE/Dubai", "DE/Berlin"],
+                return_value=["AE/Dubai", "AE/Dubai"],
             ),
         ):
             result = sorter.preview(root)
 
-        assert len(result["trips"]) == 2
-        # Only rename trip 1, leave trip 2 as suggested
-        trip1_id = result["trips"][0]["id"]
         moved = sorter.execute(
             result["plan"],
-            trip_names={str(trip1_id): "My Dubai Trip"},
+            no_gps_name="Unknown Location",
         )
 
         folders = {e["file"]: e["folder"] for e in moved}
-        assert folders["a.jpg"] == "My Dubai Trip"
-        assert folders["b.jpg"] == "Home"
-        assert folders["c.jpg"] == "DE/Berlin"  # original suggested name
+        assert folders["a.jpg"] == "AE/Dubai"
+        assert folders["b.jpg"] == "AE/Dubai"
+        assert folders["c.jpg"] == "Unknown Location"
 
-    def test_execute_saves_aliases(
+    def test_areas_persist_after_execute(
         self, sorter: GpsSorter, tmp_path: Path,
     ) -> None:
-        """Execute with trip_names persists aliases in DB."""
+        """Areas created during preview persist after execute."""
         root = tmp_path / "persist"
         root.mkdir()
         (root / "a.jpg").write_text("a")
@@ -988,28 +1163,19 @@ class TestExecute:
         ):
             result = sorter.preview(root)
 
-        tid = result["trips"][0]["id"]
-        sorter.execute(
-            result["plan"],
-            trip_names={str(tid): "Dubai Holiday"},
-        )
+        sorter.execute(result["plan"])
+        areas = sorter.get_areas()
+        assert len(areas) == 1
+        assert areas[0]["geocoded_name"] == "AE/Dubai"
 
-        aliases = sorter.get_aliases()
-        assert len(aliases) == 1
-        assert aliases[0]["alias"] == "Dubai Holiday"
-        assert abs(aliases[0]["lat"] - 25.2) < 0.01
-        assert abs(aliases[0]["lon"] - 55.3) < 0.01
-        assert aliases[0]["radius_km"] >= 1.0
-
-    def test_saved_alias_auto_matches_next_preview(
+    def test_saved_area_auto_matches_next_preview(
         self, sorter: GpsSorter, tmp_path: Path,
     ) -> None:
-        """After saving an alias via execute, next preview auto-matches it."""
+        """After auto-creating an area, next preview auto-matches it."""
         root = tmp_path / "reuse"
         root.mkdir()
         (root / "a.jpg").write_text("a")
 
-        # First run: save alias
         with (
             patch.object(
                 GpsSorter, "_gps_coordinates", return_value=(25.2, 55.3),
@@ -1023,16 +1189,11 @@ class TestExecute:
         ):
             result = sorter.preview(root)
 
-        tid = result["trips"][0]["id"]
-        sorter.execute(
-            result["plan"],
-            trip_names={str(tid): "Dubai Holiday"},
-        )
+        sorter.execute(result["plan"])
 
         # Restore file for second preview
         (root / "a.jpg").write_text("a")
 
-        # Second run: should auto-match alias
         with (
             patch.object(
                 GpsSorter, "_gps_coordinates", return_value=(25.2, 55.3),
@@ -1041,18 +1202,89 @@ class TestExecute:
         ):
             result2 = sorter.preview(root)
 
-        assert len(result2["trips"]) == 0  # no trips — matched as alias
-        assert result2["plan"][0]["group"] == "location"
-        assert result2["plan"][0]["folder"] == "Dubai Holiday"
+        assert len(result2["new_areas"]) == 0
+        assert result2["plan"][0]["group"] == "area"
+        assert result2["plan"][0]["folder"] == "AE/Dubai"
 
-    def test_execute_no_trip_names_no_alias_saved(
-        self, sorter: GpsSorter, photo_dir: Path,
-    ) -> None:
-        """Execute without trip_names does not save any aliases."""
-        with (
-            patch.object(GpsSorter, "_gps_coordinates", return_value=None),
-            patch.object(GpsSorter, "_file_timestamp", return_value=1000.0),
-        ):
-            plan = sorter.preview(photo_dir)["plan"]
-        sorter.execute(plan)
-        assert sorter.get_aliases() == []
+
+# ---------------------------------------------------------------------------
+# Legacy migration
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyMigration:
+    """Tests for _migrate_legacy_aliases."""
+
+    def test_migrates_old_aliases(self, tmp_path: Path) -> None:
+        """Old gps_region_aliases data is migrated to regions + areas."""
+        from sqlalchemy import create_engine, text
+
+        db_path = tmp_path / "migrate.db"
+        url = f"sqlite:///{db_path}"
+        eng = create_engine(url)
+        with eng.connect() as conn:
+            conn.execute(text(
+                "CREATE TABLE gps_region_aliases ("
+                "  id INTEGER PRIMARY KEY,"
+                "  alias TEXT NOT NULL,"
+                "  original_name TEXT,"
+                "  lat REAL NOT NULL,"
+                "  lon REAL NOT NULL,"
+                "  radius_km REAL NOT NULL DEFAULT 5.0"
+                ")"
+            ))
+            conn.execute(text(
+                "INSERT INTO gps_region_aliases "
+                "(alias, original_name, lat, lon, radius_km) "
+                "VALUES ('Home', 'DE/Munich', 48.135, 11.582, 3.0)"
+            ))
+            conn.commit()
+        eng.dispose()
+
+        sorter = GpsSorter(db_url=url)
+        regions = sorter.get_regions()
+        assert len(regions) == 1
+        assert regions[0]["name"] == "Home"
+        assert len(regions[0]["areas"]) == 1
+        assert regions[0]["areas"][0]["geocoded_name"] == "DE/Munich"
+        assert regions[0]["areas"][0]["lat"] == 48.135
+
+    def test_no_migration_when_areas_exist(self, tmp_path: Path) -> None:
+        """Migration is skipped if areas table already has data."""
+        from sqlalchemy import create_engine, text
+
+        db_path = tmp_path / "skip.db"
+        url = f"sqlite:///{db_path}"
+
+        # First create with no old data to set up tables
+        s1 = GpsSorter(db_url=url)
+        s1.add_area("Existing", 1.0, 2.0)
+
+        # Now add old table
+        eng = create_engine(url)
+        with eng.connect() as conn:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS gps_region_aliases ("
+                "  id INTEGER PRIMARY KEY,"
+                "  alias TEXT NOT NULL,"
+                "  original_name TEXT,"
+                "  lat REAL NOT NULL,"
+                "  lon REAL NOT NULL,"
+                "  radius_km REAL NOT NULL DEFAULT 5.0"
+                ")"
+            ))
+            conn.execute(text(
+                "INSERT INTO gps_region_aliases "
+                "(alias, original_name, lat, lon, radius_km) "
+                "VALUES ('Old', 'XX/Old', 10.0, 20.0, 5.0)"
+            ))
+            conn.commit()
+        eng.dispose()
+
+        # Re-create sorter — migration should be skipped
+        s2 = GpsSorter(db_url=url)
+        regions = s2.get_regions()
+        assert len(regions) == 0  # Old data NOT migrated
+        areas = s2.get_areas()
+        assert len(areas) == 1
+        assert areas[0]["geocoded_name"] == "Existing"

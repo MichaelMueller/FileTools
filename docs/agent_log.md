@@ -1,5 +1,288 @@
 # Agent Log
 
+## 2026-02-27 18:30 – Harmonize delete/remove buttons with trash icon
+
+### Summary
+Created a unified `btn-icon-delete` CSS class for all delete/remove buttons across the app. All now use the Material Icons `delete` (trash) icon with consistent size (18px), padding (8px), red color, and hover effect.
+
+### Changes
+
+- **`file_tools/static/index.html`**:
+  - Added `.btn-icon-delete` CSS class with consistent border, color, padding, hover style
+  - **PDF Merge**: 2 file-item remove buttons (desktop + browser lists) changed from `close` icon to `delete`
+  - **PDF 2 DCM template clear**: changed from `btn btn-outline` + `clear` icon to `btn-icon-delete` + `delete`
+  - **PDF 2 DCM tag remove**: changed from `btn btn-outline` + `close` icon to `btn-icon-delete` + `delete`
+  - **PDF 2 DCM config delete**: changed from `btn btn-outline` + `delete` icon (14px, inline color) to `btn-icon-delete` + `delete` (unified)
+  - **GPS Sorter region delete**: changed from `btn btn-outline` + `close` icon to `btn-icon-delete` + `delete`
+  - **GPS Sorter area delete**: changed from `btn btn-outline` + `close` icon to `btn-icon-delete` + `delete`
+
+---
+
+## 2026-02-27 18:15 – Fix pywebview deprecations, backend hang, VR SH warning
+
+### Summary
+Fixed three issues: deprecated `OPEN_DIALOG`/`SAVE_DIALOG`/`FOLDER_DIALOG` constants replaced with `FileDialog.OPEN`/`.SAVE`/`.FOLDER`; backend uvicorn server now explicitly shuts down and calls `os._exit(0)` when the pywebview window closes (prevents process hanging); `ImplementationVersionName` shortened from 17 to 10 chars to satisfy DICOM VR SH max-length of 16.
+
+### Changes
+
+- **`file_tools/main.py`**:
+  - `dialog_files()`: `_wv.OPEN_DIALOG` -> `_wv.FileDialog.OPEN`
+  - `dialog_save()`: `_wv.SAVE_DIALOG` -> `_wv.FileDialog.SAVE`
+  - `dialog_directory()`: `_wv.FOLDER_DIALOG` -> `_wv.FileDialog.FOLDER`
+
+- **`file_tools/desktop.py`**:
+  - Added module-level `_uvicorn_server` to hold the running server instance
+  - `_run_server()` stores server in `_uvicorn_server` global
+  - After `webview.start()` returns: sets `_uvicorn_server.should_exit = True` then `sys.exit(0)`
+
+- **`file_tools/tools/pdf2dcm.py`**:
+  - `ImplementationVersionName` shortened from `"FileTools_PDF2DCM"` (17 chars) to `"FT_PDF2DCM"` (10 chars)
+
+- **`file_tools/tests/test_main.py`**:
+  - Extracted `_mock_webview()` helper with `FileDialog.OPEN/SAVE/FOLDER` attributes
+  - Updated all 4 dialog tests to use `_mock_webview()` instead of `MagicMock(OPEN_DIALOG=0, ...)`
+
+- **`file_tools/tests/test_desktop.py`**:
+  - `test_run_desktop_starts_server_and_webview`: patched `sys.exit`, asserts `sys.exit(0)` called
+  - `test_run_server_uses_uvicorn`: asserts `_uvicorn_server` global is set
+
+---
+
+## 2026-02-27 18:00 – Memorize file selections in PDF 2 DCM
+
+### Summary
+PDF and template file paths selected in the PDF 2 DCM tool are now persisted across sessions using `localStorage`. Desktop mode paths (strings) are stored when chosen; browser `File` objects cannot be serialized but the pattern gracefully handles that. Clearing the template also removes the stored value.
+
+### Changes
+
+- **`file_tools/static/index.html`**:
+  - `dcmBrowsePdf()`: Added `localStorage.setItem('dcm-pdf-path', ...)` after selecting a file in desktop mode
+  - `dcmBrowseTemplate()`: Added `localStorage.setItem('dcm-template-path', ...)` after selecting a template in desktop mode
+  - `dcmClearTemplate()`: Added `localStorage.removeItem('dcm-template-path')`
+  - `DOMContentLoaded` handler: Added restoration block that reads `dcm-pdf-path` and `dcm-template-path` from `localStorage` and restores both the state variables and input field values
+
+---
+
+## 2026-02-27 17:30 – UI polish: button heights, config layout, GPS radius
+
+### Summary
+Moved config manager below tag editor with visual splitter. Replaced separate select+text input with an editable `<datalist>` combo. Matched all button heights to text field heights project-wide. Widened GPS radius input fields.
+
+### Changes
+
+- **Global CSS** (`index.html`):
+  - `.btn` padding changed from `8px 20px` to `10px 20px` to match input field height (`10px 14px`).
+
+- **PDF 2 DCM section** (`index.html`):
+  - Moved "Tag Configurations" section below the tag editor (was above).
+  - Added `<hr>` visual splitter between tag editor and config manager.
+  - Replaced `<select>` dropdown + separate name input with a single editable `<input>` backed by `<datalist>` — user can type a new name or select from saved ones.
+  - Removed the old Load/Save/Delete button row with select+input; replaced with a cleaner single-row layout.
+  - Config JS functions now use `dcm-config-datalist` instead of `dcm-config-select`.
+
+- **GPS Sorter** (`index.html`):
+  - Radius input `min-width` changed from `80px` to `100px` in the "Add Area" form.
+  - Radius input `width` changed from `70px` to `100px` in both region-assigned and unassigned area listings.
+
+## 2026-02-27 17:00 – PDF 2 DCM: Always-visible tags, named configs, Open Folder
+
+### Summary
+Made DICOM tags section always visible (removed collapsible `<details>`). Added DB-backed named tag configurations (save/load/delete). Changed "Open after creation" to "Open folder after creation".
+
+### Changes
+
+- **Backend** (`file_tools/tools/pdf2dcm.py`):
+  - Added SQLAlchemy model `DcmTagConfigRow` (id, name, tags_json) in table `dcm_tag_configs`.
+  - `Pdf2Dcm` now takes optional `db_url` parameter (defaults to `platformdirs/filetools_pdf2dcm.db`).
+  - New instance methods: `get_configs()`, `save_config(name, tags)`, `delete_config(config_id)`.
+  - Save overwrites if name already exists.
+
+- **API** (`file_tools/main.py`):
+  - New module var `_pdf2dcm_db_url`.
+  - `GET /api/pdf2dcm/configs`: List all saved configs.
+  - `POST /api/pdf2dcm/configs`: Save/overwrite a config (`{name, tags}`).
+  - `DELETE /api/pdf2dcm/configs/{config_id}`: Delete a config.
+
+- **Frontend** (`file_tools/static/index.html`):
+  - Replaced `<details>` wrapper with always-visible section.
+  - Added config UI: dropdown selector, Load button, name input, Save button, Delete button.
+  - Changed checkbox from "Open after creation" to "Open folder after creation" — now opens parent directory via `_openPath()`.
+  - New JS functions: `dcmRefreshConfigs()`, `dcmLoadConfig()`, `dcmSaveConfig()`, `dcmDeleteConfig()`.
+
+- **Tests** (`test_pdf2dcm.py`):
+  - Added `converter` fixture (in-memory DB).
+  - `TestGetConfigs`: 3 tests (empty, returns saved, ordered by name).
+  - `TestSaveConfig`: 4 tests (creates new, overwrites, multiple, empty tags).
+  - `TestDeleteConfig`: 3 tests (deletes, missing returns false, does not affect others).
+
+- **API tests** (`test_main.py`):
+  - 6 new tests: `test_pdf2dcm_configs_empty`, `test_pdf2dcm_configs_list`, `test_pdf2dcm_save_config`, `test_pdf2dcm_save_config_empty_name`, `test_pdf2dcm_delete_config`, `test_pdf2dcm_delete_config_not_found`.
+
+## 2026-02-27 16:30 – PDF 2 DCM: "Open after creation" option
+
+### Summary
+Added an "Open after creation" checkbox to the PDF 2 DCM tool, matching the pattern used by the PDF merge tool.
+
+### Changes
+- **Frontend** (`file_tools/static/index.html`):
+  - Added `dcm-open-after` checkbox with label before the Generate button.
+  - Wired up `_openFile()` call after successful save in both desktop-path and desktop-blob save branches of `dcmGenerate()`.
+
+## 2026-02-27 16:00 – New tool: PDF 2 DCM (DICOM Encapsulated PDF)
+
+### Summary
+Added a new "PDF 2 DCM" tool that converts PDF files into DICOM Encapsulated PDF objects. Supports optional DICOM dataset templates, dynamic tag editing, and a save-file dialog defaulting to `<pdf_name>.dcm`.
+
+### Changes
+
+- **Backend** (`file_tools/tools/pdf2dcm.py` — new, ~220 lines):
+  - `Pdf2Dcm` class with `SOP_CLASS_UID = 1.2.840.10008.5.1.4.1.1.104.1`.
+  - `COMMON_TAGS`: ~20 commonly-used DICOM tags (PatientName, PatientID, StudyDescription, Modality, DocumentTitle, etc.) with labels and defaults.
+  - `common_tags()`: Returns tag metadata list for the frontend dropdown.
+  - `convert(pdf_path, *, template_path=None, tags=None)`: Main entry. Reads PDF, builds DICOM Dataset, returns bytes.
+  - `_build_dataset()`: Constructs Dataset — copies template tags, sets UIDs (fresh SOPInstanceUID always), mandatory Encapsulated PDF attributes, type 2 elements, embeds PDF in `EncapsulatedDocument`.
+  - `_copy_template_tags()`, `_apply_tags()`, `_to_bytes()`: Helpers for template handling, user tag application, and serialization.
+  - Uses `pydicom.uid.generate_uid()` for UID generation, `FileMetaDataset` for proper file meta.
+
+- **API** (`file_tools/main.py` — 3 new endpoints + 1 modified):
+  - `GET /api/pdf2dcm/tags`: Returns common DICOM tags list for dropdown.
+  - `POST /api/pdf2dcm/convert`: Browser upload mode — accepts `pdf` (UploadFile), optional `template` (UploadFile), `tags_json` (JSON string). Returns `application/dicom` with `Content-Disposition: attachment`.
+  - `POST /api/pdf2dcm/convert-desktop`: Desktop path mode — accepts JSON body with `pdf_path`, `output_path`, optional `template_path` and `tags`. Writes DCM file to disk.
+  - `GET /api/dialog/save`: Extended with optional `file_types` query param for custom file type filters (supports DCM files).
+
+- **Frontend** (`file_tools/static/index.html` — new tab, ~320 lines added):
+  - New tab button with `medical_information` icon.
+  - PDF file input with Browse button (desktop dialog or browser file input).
+  - Optional dataset template input with Browse + Clear buttons.
+  - Collapsible DICOM Tags section: editable tag table, dropdown for common tags + "Custom tag keyword" option, Add/Remove controls.
+  - Generate DCM button triggers conversion + save dialog.
+  - ~250 lines of JavaScript: tag management (add/remove/update/render), file browsing, conversion flow for both desktop and browser modes.
+
+- **Dependencies** (`pyproject.toml`):
+  - Added `pydicom>=2.4.0`.
+
+- **Tests** (`file_tools/tests/test_pdf2dcm.py` — new, ~410 lines, 45 tests):
+  - `TestCommonTags`: 5 tests for tag metadata.
+  - `TestConvertBasic`: 11 tests for core conversion (valid DICOM, PDF embedded, UIDs, file meta, dates, type 2 elements).
+  - `TestConvertWithTags`: 8 tests for user-supplied tags (individual, multiple, UID preservation, invalid keyword skipped).
+  - `TestConvertWithTemplate`: 8 tests for template handling (copies patient/study fields, fresh SOP UID, tag override, nonexistent template, PDF still embedded).
+  - `TestConvertErrors`: 2 tests for error cases.
+  - `TestBuildDataset`, `TestCopyTemplateTags`, `TestApplyTags`, `TestToBytes`: 11 internal method tests.
+
+- **API tests** (`file_tools/tests/test_main.py` — 10 new test functions):
+  - `test_pdf2dcm_tags`, `test_pdf2dcm_convert`, `test_pdf2dcm_convert_with_template`, `test_pdf2dcm_convert_empty_pdf`, `test_pdf2dcm_convert_bad_tags_json`, `test_pdf2dcm_convert_desktop`, `test_pdf2dcm_convert_desktop_missing_pdf`, `test_pdf2dcm_convert_desktop_missing_output`, `test_pdf2dcm_convert_desktop_file_not_found`, `test_pdf2dcm_convert_desktop_conversion_error`.
+
+## 2026-02-27 14:00 – Region & Area data model rewrite + backslash fix + recursive scanning
+
+### Summary
+Complete redesign of GPS location management: replaced flat alias system with hierarchical **Area + Region** model. Fixed image-click bug caused by unescaped backslashes. Added recursive directory scanning. Rewrote all tests.
+
+### Changes
+
+- **Data model** (`gps_sorter.py` — full rewrite, 781 lines):
+  - `RegionAliasRow` removed. Replaced with `RegionRow` (id, name) + `AreaRow` (id, geocoded_name, lat, lon, radius_km, region_id FK).
+  - **Area** = auto-discovered GPS location (geocoded name + coords + radius). **Region** = user-defined grouping of areas.
+  - Files in region-assigned areas → region folder. Unassigned areas → geocoded_name folder. New areas from scans start unassigned.
+  - `_match_area()` replaces `_match_alias()`, returns full area dict.
+  - `_build_plan()` shared logic for preview/reclassify: classify → cluster → reverse-geocode → auto-create areas → assign files → set destinations.
+  - `_migrate_legacy_aliases()` migrates old `gps_region_aliases` table → creates region + area per old alias.
+  - Region CRUD: `get_regions()`, `add_region()`, `update_region()`, `delete_region()` (unassigns areas).
+  - Area CRUD: `get_areas()`, `add_area()`, `update_area()` (uses `...` sentinel for region_id), `delete_area()`.
+  - `preview()` now uses `rglob("*")` for recursive scanning (default `recursive=True`).
+  - `execute()` simplified — no more `trip_names` parameter.
+
+- **API** (`main.py` — GPS section fully replaced):
+  - Old endpoints removed: GET/POST/PUT/DELETE `/api/gps-sort/aliases`.
+  - New endpoints: GET/POST/PUT/DELETE `/api/gps-sort/regions`, GET/POST/PUT/DELETE `/api/gps-sort/areas`.
+  - Preview returns `new_areas` instead of `trips`.
+  - Execute accepts only `no_gps_name`, no more `trip_names`.
+
+- **Frontend** (`index.html` — GPS HTML + JS sections fully rewritten):
+  - New "Regions & Areas" management UI with collapsible `<details>` sections.
+  - `_escJs()` helper escapes `\` → `\\` and `'` → `\'` for safe onclick strings — **fixes image-click bug**.
+  - New functions: `loadGpsData()`, `renderGpsRegionsAndAreas()`, region/area CRUD, `renderGpsDetectedAreas()`, `renderGpsSortPreview()`.
+  - All alias mutations now call region/area endpoints and trigger reclassify.
+
+- **Tests** (`test_gps_sorter.py` — full rewrite, ~630 lines):
+  - Preserved: TestDmsToDecimal, TestHaversine, TestGpsCoordinates, TestReverseGeocode, TestParseGoogleMapsUrl, TestSanitiseFolder, TestFileTimestamp.
+  - New: TestMatchArea, TestRegionCrud (9 tests), TestAreaCrud (15 tests), TestPreview (18 tests), TestReclassify (5 tests), TestExecute (13 tests), TestLegacyMigration (2 tests).
+
+- **Tests** (`test_main.py` — GPS section replaced):
+  - Replaced all alias endpoint tests with region/area endpoint tests.
+  - Updated preview/reclassify/execute tests for new data structures (new_areas, area_id, no trip_names).
+
+## 2026-02-27 10:30 – Uniform input sizing in alias list
+
+- **CSS**: Added `input[type="number"]` to the global input rule so number fields inherit the same `padding`, `font-size`, `border`, `border-radius`, and `background` as text inputs.
+- **Frontend** (`index.html`): Removed small inline sizing overrides from lat/lon/radius inputs and the delete button. All now match the text field height. Delete button uses `padding:10px 14px` and a larger icon (`18px`).
+
+## 2026-02-27 10:15 – Make all alias attributes editable
+
+- **Backend** (`gps_sorter.py`): Extended `update_alias()` with `original_name` parameter (uses `...` sentinel so callers can set it to `None`).
+- **API** (`main.py`): Updated `PUT /api/gps-sort/aliases` to handle `original_name` alongside `alias`, `lat`, `lon`, `radius_km`. String fields allow `None` values.
+- **Frontend** (`index.html`):
+  - Redesigned `renderGpsAliases()`: all five fields (name, original location, lat, lon, radius) are now inline-editable inputs.
+  - Unified `gpsUpdateAliasRadius` / `gpsUpdateAliasName` into a single `gpsUpdateAlias(id, field, value)` function.
+  - Coordinates shown as editable number inputs with a Google Maps link beside them.
+- **Tests**: Added `test_update_alias_original_name`, `test_update_alias_coordinates` (backend), `test_gps_sort_aliases_update_original_name`, `test_gps_sort_aliases_update_coords` (API).
+
+## 2026-02-27 09:30 – Reclassify on alias changes, editable alias regions
+
+- **Backend** (`gps_sorter.py`): New `reclassify(plan)` method — re-evaluates an existing plan against current aliases without re-scanning files for GPS data. Runs phases 3-8 (classify, trip grouping, reverse-geocode, metadata, folder names, destinations) on already-extracted lat/lon coordinates.
+- **API** (`main.py`): New `POST /api/gps-sort/reclassify` endpoint — accepts the current plan and returns a fresh classification.
+- **Frontend** (`index.html`):
+  - New `gpsReclassify()` function calls the reclassify endpoint and updates the UI (plan, trips, preview table).
+  - All alias mutations (delete, update radius, add alias, add trip alias) now trigger `gpsReclassify()` instead of a full `gpsSortPreview()` rescan.
+  - New `gpsUpdateAliasName(id, newName)` function — renames an alias via PUT and reclassifies.
+  - `renderGpsSortTrips()` now also collects and displays alias-matched regions from the plan with editable name inputs (icon `bookmark`, color `--clr-secondary`), showing file count and coords. Renaming triggers `gpsUpdateAliasName` which reclassifies.
+- **Tests**: Added `TestReclassify` class in `test_gps_sorter.py` (4 tests: matches new alias, preserves source, sets destinations, empty plan). Added 2 API tests in `test_main.py` (`test_gps_sort_reclassify_success`, `test_gps_sort_reclassify_empty`).
+
+## 2026-02-27 09:05 – Detected Regions: "Add Alias" button with auto-refresh
+
+- **Frontend** (`index.html`):
+  - Added `_gpsAliasesList` global to cache loaded aliases for proximity checks.
+  - `loadGpsAliases()` now stores the alias list in `_gpsAliasesList`.
+  - `renderGpsSortTrips()`: Each detected region shows a `bookmark_add` "Add Alias" button unless an alias already exists within ~0.5° of the trip's centroid.
+  - New `gpsAddTripAlias(tripId)` function: creates an alias from the trip's name (from the input field), centroid, and radius, then refreshes both aliases and the full preview so the region switches from "New" to "Alias".
+
+## 2026-02-27 08:45 – Move persistent storage to OS user app data directory
+
+- **`gps_sorter.py`** and **`dedup_scanner.py`**: Changed default DB path from app-relative `data/` to the OS-standard user data directory via `platformdirs.user_data_dir("FileTools")`. On Windows this resolves to `%LOCALAPPDATA%\FileTools`, on Linux `~/.local/share/FileTools`, on macOS `~/Library/Application Support/FileTools`. Directory is created automatically with `parents=True`.
+- **`pyproject.toml`**: Added `platformdirs>=4.0.0` to dependencies.
+- Reverted `.gitignore` change for `file_tools/data/` (no longer needed).
+- Removed old DB files from system temp directory.
+
+## 2026-02-27 08:24 – GPS Sorter: Region management, clickable UI, Google Maps integration
+
+- **Database model** (`gps_sorter.py`): Added `original_name` column to `RegionAliasRow` (nullable, stores the raw reverse-geocoded name before the user renames it).
+- **New methods** (`gps_sorter.py`):
+  - `add_alias(alias, lat, lon, radius_km, original_name)` — directly create a region alias via public API.
+  - `update_alias(alias_id, *, alias, lat, lon, radius_km)` — update specific fields of an existing alias by id, returns updated dict or None.
+  - `parse_google_maps_url(url)` — static method, parses `@lat,lon`, `?q=lat,lon`, `?ll=lat,lon`, and plain `lat,lon` coordinate strings. Returns `(lat, lon)` or `None`.
+- **Updated methods** (`gps_sorter.py`): `_save_alias()` accepts `original_name` parameter, `_alias_to_dict()` includes `original_name`, `execute()` passes `original_name` from `location_name` when saving trip aliases.
+- **New API endpoints** (`main.py`):
+  - `POST /api/gps-sort/aliases` — create alias with lat/lon or Google Maps URL.
+  - `PUT /api/gps-sort/aliases` — update alias fields (alias name, radius, coords).
+  - `POST /api/gps-sort/parse-url` — extract coordinates from a Google Maps URL.
+- **Frontend** (`index.html`):
+  - "Add new region alias" form in the aliases section: name, Google Maps URL/coords, radius (km).
+  - Aliases display `original_name` in italics when present.
+  - Alias radius is editable via inline `<input type="number">` with auto-save on change.
+  - Coordinates are clickable Google Maps links (`_gmapsLink()` helper).
+  - Files and folders in preview table are clickable to open via OS (`_openPath()` helper calling `POST /api/file/open`).
+  - Renamed "Detected Trips" → "Detected Regions", icon `flight` → `place`.
+  - Group labels changed from "Trip"/"Location" to "New"/"Alias".
+  - Region centroids in the detected regions card are clickable Google Maps links.
+- **Tests** (`test_gps_sorter.py`): Added `TestParseGoogleMapsUrl` (8 tests: @-style, query, ll, place, plain coords, negative coords, invalid, empty). Added tests for `add_alias`, `add_alias_with_original_name`, `update_alias`, `update_alias_nonexistent`, `save_alias_with_original_name`, `alias_to_dict_no_original`. Updated `test_alias_to_dict` for `original_name`.
+- **Tests** (`test_main.py`): Added 7 new tests: `test_gps_sort_aliases_create`, `test_gps_sort_aliases_create_from_url`, `test_gps_sort_aliases_create_bad_url`, `test_gps_sort_aliases_create_missing_coords`, `test_gps_sort_aliases_update`, `test_gps_sort_aliases_update_not_found`, `test_gps_sort_parse_url`, `test_gps_sort_parse_url_invalid`. Updated `test_gps_sort_aliases_list` for `original_name`.
+
+## 2026-02-26 18:45 – GPS Sorter: Customisable "No GPS" folder name
+
+- **Backend** (`gps_sorter.py`): Added `no_gps_name` parameter to `GpsSorter.execute()`. When provided and non-empty, overrides the default `No GPS` folder name for files without GPS data. The name is sanitised via `_sanitise_folder()`.
+- **API** (`main.py`): `POST /api/gps-sort/execute` now accepts optional `no_gps_name` field in the request body. Passed through to `GpsSorter.execute()`.
+- **Frontend** (`index.html`): After preview, if there are files without GPS, a `gps_off` icon and editable input field (default "No GPS") appears in the "Detected Trips" card alongside trip name inputs. The user can rename this folder before executing. The value is sent as `no_gps_name` in the execute request. The trips section now also appears when there are only no-GPS files (no trips needed).
+- **Tests** (`test_gps_sorter.py`): Added 5 new tests: `test_no_gps_name_override`, `test_no_gps_name_empty_uses_default`, `test_no_gps_name_none_uses_default`, `test_no_gps_name_with_trips`, `test_no_gps_name_sanitised`.
+
 ## 2026-02-26 18:15 – GPS Sorter v3: Replace Named Locations with auto-learned Region Aliases
 
 - **Core concept change**: Removed manual Named Locations CRUD (lat/lon/radius input). Replaced with auto-learned Region Aliases — when a user names a trip during execute, the system remembers the region (centroid + radius) under that alias and auto-matches future photos to it.

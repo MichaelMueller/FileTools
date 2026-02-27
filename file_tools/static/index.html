@@ -212,6 +212,7 @@
       letter-spacing: .03em;
     }
     input[type="text"],
+    input[type="number"],
     textarea {
       width: 100%;
       background: var(--clr-surface2);
@@ -225,6 +226,7 @@
       outline: none;
     }
     input[type="text"]:focus,
+    input[type="number"]:focus,
     textarea:focus { border-color: var(--clr-primary); }
     input[type="file"] { display: none; }
 
@@ -233,7 +235,7 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 20px;
+      padding: 10px 20px;
       border-radius: var(--radius);
       border: none;
       font-family: 'Roboto', sans-serif;
@@ -372,6 +374,26 @@
     .file-item__btn:hover { color: #fff; background: rgba(255,255,255,.08); }
     .file-item__btn.remove:hover { color: var(--clr-error); }
     .file-item__btn .material-icons { font-size: 18px; }
+
+    /* ── Unified icon-only delete / remove button ─────────────────────── */
+    .btn-icon-delete {
+      background: none;
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      color: var(--clr-error);
+      cursor: pointer;
+      padding: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background var(--transition), border-color var(--transition);
+      line-height: 1;
+    }
+    .btn-icon-delete:hover {
+      background: rgba(244,67,54,.12);
+      border-color: var(--clr-error);
+    }
+    .btn-icon-delete .material-icons { font-size: 18px; }
 
     /* ── Checkbox list (dir compare) ─────────────────────────────────── */
     .check-list { max-height: 240px; overflow-y: auto; margin-top: var(--sp-sm); }
@@ -615,6 +637,9 @@
     </button>
     <button class="tab-btn" id="tab-gps-sorter" onclick="switchTab('gps-sorter', this)">
       <span class="material-icons" style="font-size:16px">location_on</span>GPS Sorter
+    </button>
+    <button class="tab-btn" id="tab-pdf2dcm" onclick="switchTab('pdf2dcm', this)">
+      <span class="material-icons" style="font-size:16px">medical_information</span>PDF 2 DCM
     </button>
   </div>
 </nav>
@@ -919,11 +944,11 @@
         <span class="material-icons">location_on</span> GPS Sorter
       </div>
       <p class="card__desc">
-        Sort photos into sub-folders based on GPS coordinates.
-        Photos are automatically grouped into <strong>trips</strong> by geographic proximity.
-        Name each trip before sorting &mdash; your names are saved as
-        <strong>region aliases</strong> and reused automatically next time.
-        Photos without GPS go into <code style="color:var(--clr-primary)">No GPS</code>.
+        Sort photos into sub-folders based on GPS coordinates (scans recursively).
+        Photos are grouped into <strong>areas</strong> by proximity.
+        Organise areas into <strong>regions</strong> to merge multiple locations
+        under one folder name. Unassigned areas use their geocoded name.
+        Photos without GPS go into <code style="color:var(--clr-primary)">No GPS</code> (customisable).
       </p>
 
       <div class="row">
@@ -938,13 +963,57 @@
         </div>
       </div>
 
-      <!-- Saved Region Aliases (read-only, loaded from DB) -->
-      <details id="gps-aliases-details" style="margin-top:var(--sp-sm);">
+      <!-- Regions & Areas management -->
+      <details id="gps-regions-details" style="margin-top:var(--sp-sm);">
         <summary style="font-size:.85rem;cursor:pointer;color:var(--clr-muted);user-select:none;">
-          <span class="material-icons" style="font-size:16px;vertical-align:text-bottom;">bookmark</span>
-          Saved Region Aliases
+          <span class="material-icons" style="font-size:16px;vertical-align:text-bottom;">layers</span>
+          Regions &amp; Areas
         </summary>
-        <div id="gps-aliases-list" style="margin-top:var(--sp-xs);"></div>
+
+        <div id="gps-regions-list" style="margin-top:var(--sp-xs);"></div>
+
+        <div id="gps-unassigned-areas" style="margin-top:var(--sp-sm);"></div>
+
+        <!-- Add region form -->
+        <div style="margin-top:var(--sp-sm);padding:var(--sp-sm);border:1px solid var(--clr-outline);border-radius:var(--radius);">
+          <div style="font-size:.82rem;color:var(--clr-muted);margin-bottom:var(--sp-xs);">Add new region</div>
+          <div style="display:flex;gap:var(--sp-xs);align-items:end;">
+            <div style="flex:1;min-width:150px;">
+              <input type="text" id="gps-new-region-name" placeholder="e.g. Home, Dubai Trips" style="width:100%;" />
+            </div>
+            <button class="btn btn-outline" onclick="gpsAddRegion()" style="white-space:nowrap;margin-bottom:1px;">
+              <span class="material-icons" style="font-size:14px">add</span>Add Region
+            </button>
+          </div>
+        </div>
+
+        <!-- Add area form -->
+        <div style="margin-top:var(--sp-sm);padding:var(--sp-sm);border:1px solid var(--clr-outline);border-radius:var(--radius);">
+          <div style="font-size:.82rem;color:var(--clr-muted);margin-bottom:var(--sp-xs);">Add area manually</div>
+          <div style="display:flex;gap:var(--sp-xs);flex-wrap:wrap;align-items:end;">
+            <div style="flex:1;min-width:120px;">
+              <label style="font-size:.75rem;color:var(--clr-muted);">Name</label>
+              <input type="text" id="gps-new-area-name" placeholder="e.g. Munich Airport" style="width:100%;" />
+            </div>
+            <div style="flex:2;min-width:200px;">
+              <label style="font-size:.75rem;color:var(--clr-muted);">Google Maps URL or lat,lon</label>
+              <input type="text" id="gps-new-area-url" placeholder="https://maps.google.com/... or 48.135,11.582" style="width:100%;" />
+            </div>
+            <div style="min-width:100px;">
+              <label style="font-size:.75rem;color:var(--clr-muted);">Radius (km)</label>
+              <input type="number" id="gps-new-area-radius" value="5" min="0.1" step="0.5" style="width:100%;" />
+            </div>
+            <div style="min-width:120px;">
+              <label style="font-size:.75rem;color:var(--clr-muted);">Assign to region</label>
+              <select id="gps-new-area-region" style="width:100%;padding:10px 14px;font-size:.9rem;background:var(--clr-surface2);border:1px solid var(--clr-outline);border-radius:var(--radius);color:var(--clr-on-bg);">
+                <option value="">— none —</option>
+              </select>
+            </div>
+            <button class="btn btn-outline" onclick="gpsAddArea()" style="white-space:nowrap;margin-bottom:1px;">
+              <span class="material-icons" style="font-size:14px">add_location</span>Add Area
+            </button>
+          </div>
+        </div>
       </details>
 
       <div class="action-row" style="margin-top:var(--sp-lg)">
@@ -955,11 +1024,117 @@
       <div class="result-box" id="gps-result"></div>
     </div>
 
-    <!-- Detected trips (populated by JS after preview) -->
-    <div id="gps-trips-section"></div>
+    <!-- Detected areas (populated by JS after preview) -->
+    <div id="gps-areas-section"></div>
 
     <!-- Preview table (populated by JS) -->
     <div id="gps-preview"></div>
+  </section>
+
+  <!-- ─────────────────────── PDF 2 DCM ──────────────────────────── -->
+  <section class="tool-panel" id="pdf2dcm">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">medical_information</span> PDF 2 DCM
+      </div>
+      <p class="card__desc">
+        Convert a PDF file into a DICOM Encapsulated PDF.
+        Optionally provide a DICOM template file to copy patient/study tags from.
+        Add or override individual DICOM tags below.
+      </p>
+
+      <!-- PDF input -->
+      <div class="row">
+        <div class="form-group" style="flex:2">
+          <label for="dcm-pdf-path">PDF file</label>
+          <div class="row">
+            <input type="text" id="dcm-pdf-path" placeholder="/path/to/file.pdf" readonly />
+            <input type="file" id="dcm-pdf-file" accept=".pdf" style="display:none" />
+            <button class="btn btn-outline" onclick="dcmBrowsePdf()" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">picture_as_pdf</span>Browse
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Template input -->
+      <div class="row" style="margin-top:var(--sp-sm)">
+        <div class="form-group" style="flex:2">
+          <label for="dcm-template-path">Dataset template (optional DICOM file)</label>
+          <div style="display:flex;gap:var(--sp-xs);align-items:center;">
+            <input type="text" id="dcm-template-path" placeholder="/path/to/template.dcm (optional)" readonly style="flex:1;min-width:0;" />
+            <input type="file" id="dcm-template-file" style="display:none" />
+            <button class="btn btn-outline" onclick="dcmBrowseTemplate()" style="white-space:nowrap">
+              <span class="material-icons" style="font-size:16px">description</span>Browse
+            </button>
+            <button class="btn-icon-delete" onclick="dcmClearTemplate()" title="Clear template">
+              <span class="material-icons">delete</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DICOM tags -->
+      <div style="margin-top:var(--sp-sm);">
+        <div style="display:flex;align-items:center;gap:var(--sp-xs);margin-bottom:var(--sp-xs);">
+          <span class="material-icons" style="font-size:16px;color:var(--clr-muted);">label</span>
+          <span style="font-size:.85rem;color:var(--clr-muted);font-weight:500;">DICOM Tags</span>
+        </div>
+
+        <div id="dcm-tags-list"></div>
+        <div style="margin-top:var(--sp-sm);display:flex;gap:var(--sp-xs);align-items:end;flex-wrap:wrap;">
+          <div style="min-width:200px;flex:1;">
+            <label style="font-size:.75rem;color:var(--clr-muted);">Add tag</label>
+            <select id="dcm-tag-select" style="width:100%;padding:10px 14px;font-size:.9rem;background:var(--clr-surface2);border:1px solid var(--clr-outline);border-radius:var(--radius);color:var(--clr-on-bg);">
+            </select>
+          </div>
+          <div style="min-width:200px;flex:2;">
+            <label style="font-size:.75rem;color:var(--clr-muted);">Value</label>
+            <input type="text" id="dcm-tag-value" placeholder="Tag value" style="width:100%;" />
+          </div>
+          <button class="btn btn-outline" onclick="dcmAddTag()" style="white-space:nowrap;">
+            <span class="material-icons" style="font-size:14px">add</span>Add Tag
+          </button>
+        </div>
+
+        <!-- Splitter -->
+        <hr style="border:none;border-top:1px solid var(--clr-outline);margin:var(--sp-md) 0;" />
+
+        <!-- Tag configuration save / load -->
+        <div style="display:flex;align-items:center;gap:var(--sp-xs);margin-bottom:var(--sp-xs);">
+          <span class="material-icons" style="font-size:16px;color:var(--clr-muted);">bookmark</span>
+          <span style="font-size:.85rem;color:var(--clr-muted);font-weight:500;">Tag Configurations</span>
+        </div>
+        <div style="display:flex;gap:var(--sp-xs);align-items:end;flex-wrap:wrap;">
+          <div style="min-width:200px;flex:1;position:relative;">
+            <label style="font-size:.75rem;color:var(--clr-muted);">Configuration name</label>
+            <input type="text" id="dcm-config-name" placeholder="Type or select a name" list="dcm-config-datalist" autocomplete="off" style="width:100%;" />
+            <datalist id="dcm-config-datalist"></datalist>
+          </div>
+          <button class="btn btn-outline" onclick="dcmLoadConfig()" title="Load configuration" style="white-space:nowrap;">
+            <span class="material-icons" style="font-size:14px">download</span>Load
+          </button>
+          <button class="btn btn-outline" onclick="dcmSaveConfig()" title="Save current tags under this name" style="white-space:nowrap;">
+            <span class="material-icons" style="font-size:14px">save</span>Save
+          </button>
+          <button class="btn-icon-delete" onclick="dcmDeleteConfig()" title="Delete this configuration">
+            <span class="material-icons">delete</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="toggle-row" style="margin-top:var(--sp-lg)">
+        <input type="checkbox" id="dcm-open-after" />
+        <label for="dcm-open-after">Open folder after creation</label>
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="dcmGenerate()">
+          <span class="material-icons" style="font-size:16px">save_alt</span>Generate DCM
+        </button>
+      </div>
+      <div class="result-box" id="dcm-result"></div>
+    </div>
   </section>
 
 </main>
@@ -1204,7 +1379,7 @@ function renderMergeList() {
         <span class="file-item__name" title="${escHtml(p)}">${escHtml(name)}</span>
         <button class="file-item__btn" onclick="mergeMove(${i},-1)" title="Move up"><span class="material-icons">arrow_upward</span></button>
         <button class="file-item__btn" onclick="mergeMove(${i},1)" title="Move down"><span class="material-icons">arrow_downward</span></button>
-        <button class="file-item__btn remove" onclick="mergeRemove(${i})" title="Remove"><span class="material-icons">close</span></button>
+        <button class="btn-icon-delete" onclick="mergeRemove(${i})" title="Remove"><span class="material-icons">delete</span></button>
       </li>`;
     }).join('');
     return;
@@ -1223,7 +1398,7 @@ function renderMergeList() {
       <span class="file-item__size">${fileSize(f.size)}</span>
       <button class="file-item__btn" onclick="mergeMove(${i},-1)" title="Move up"><span class="material-icons">arrow_upward</span></button>
       <button class="file-item__btn" onclick="mergeMove(${i},1)" title="Move down"><span class="material-icons">arrow_downward</span></button>
-      <button class="file-item__btn remove" onclick="mergeRemove(${i})" title="Remove"><span class="material-icons">close</span></button>
+      <button class="btn-icon-delete" onclick="mergeRemove(${i})" title="Remove"><span class="material-icons">delete</span></button>
     </li>`;
   }).join('');
 }
@@ -2064,8 +2239,10 @@ async function dateSortExecute() {
 /* ═══════════════════════════════════════════════════════════════════ */
 
 let _gpsSortPlan = null;
-let _gpsSortTrips = [];
-let _gpsAliasesLoaded = false;
+let _gpsNewAreas = [];
+let _gpsRegionsList = [];
+let _gpsAreasList = [];
+let _gpsDataLoaded = false;
 
 /* Restore last directory */
 (function restoreGpsSorter() {
@@ -2073,58 +2250,291 @@ let _gpsAliasesLoaded = false;
   if (d) document.getElementById('gps-dir').value = d;
 })();
 
-/* ─── Saved region aliases (read-only display) ───────────────────── */
+/* ─── Helper: Google Maps link for coordinates ───────────────────── */
+function _gmapsLink(lat, lon, label) {
+  return `<a href="https://www.google.com/maps/@${lat},${lon},15z" target="_blank" rel="noopener" style="color:var(--clr-primary);text-decoration:none;" title="Open in Google Maps">${label || (lat.toFixed(4) + '°, ' + lon.toFixed(4) + '°')}</a>`;
+}
 
-async function loadGpsAliases() {
+/* ─── Helper: open file/folder via OS ────────────────────────────── */
+async function _openPath(path) {
   try {
-    const res = await fetch('/api/gps-sort/aliases');
-    if (!res.ok) return;
-    const data = await res.json();
-    renderGpsAliases(data.aliases || []);
+    await fetch('/api/file/open', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path}),
+    });
   } catch (_) { /* ignore */ }
-  _gpsAliasesLoaded = true;
 }
 
-function renderGpsAliases(aliases) {
-  const container = document.getElementById('gps-aliases-list');
-  if (!aliases.length) {
-    container.innerHTML = '<div style="font-size:.8rem;color:var(--clr-muted);padding:var(--sp-xs) 0;">No saved aliases yet. Name a trip during preview to create one.</div>';
-    return;
-  }
-  container.innerHTML = aliases.map(a =>
-    `<div style="display:flex;gap:var(--sp-sm);align-items:center;margin-bottom:var(--sp-xs);font-size:.82rem;flex-wrap:wrap;">
-      <span class="material-icons" style="font-size:16px;color:var(--clr-primary)">bookmark</span>
-      <span style="flex:1;min-width:120px;color:var(--clr-on-surface);font-weight:500;">${escHtml(a.alias)}</span>
-      <span style="color:var(--clr-muted);font-size:.75rem;white-space:nowrap;">${a.lat.toFixed(3)}°, ${a.lon.toFixed(3)}° · ${a.radius_km.toFixed(1)} km</span>
-      <button class="btn btn-outline btn-sm" onclick="gpsDeleteAlias(${a.id})" title="Remove alias">
-        <span class="material-icons" style="font-size:14px;color:var(--clr-error)">close</span>
-      </button>
-    </div>`
-  ).join('');
+/* ─── Helper: escape string for use inside JS string literal ─────── */
+function _escJs(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
-async function gpsDeleteAlias(id) {
+/* ═════════════════════════════════════════════════════════════════ */
+/*  Regions & Areas CRUD                                             */
+/* ═════════════════════════════════════════════════════════════════ */
+
+async function loadGpsData() {
   try {
-    await fetch('/api/gps-sort/aliases', {
+    const [regRes, areaRes] = await Promise.all([
+      fetch('/api/gps-sort/regions'),
+      fetch('/api/gps-sort/areas'),
+    ]);
+    if (regRes.ok) {
+      const d = await regRes.json();
+      _gpsRegionsList = d.regions || [];
+    }
+    if (areaRes.ok) {
+      const d = await areaRes.json();
+      _gpsAreasList = d.areas || [];
+    }
+    renderGpsRegionsAndAreas();
+  } catch (_) { /* ignore */ }
+  _gpsDataLoaded = true;
+}
+
+/* ─── Render regions & areas management section ──────────────────── */
+
+function renderGpsRegionsAndAreas() {
+  const regContainer = document.getElementById('gps-regions-list');
+  const unContainer = document.getElementById('gps-unassigned-areas');
+
+  /* Regions with their areas */
+  if (!_gpsRegionsList.length) {
+    regContainer.innerHTML = '<div style="font-size:.8rem;color:var(--clr-muted);padding:var(--sp-xs) 0;">No regions defined yet. Create one below or let a scan discover areas automatically.</div>';
+  } else {
+    regContainer.innerHTML = _gpsRegionsList.map(r => {
+      let html = '<div style="margin-bottom:var(--sp-sm);padding:var(--sp-sm);border:1px solid var(--clr-outline);border-radius:var(--radius);">';
+      /* Region header */
+      html += `<div style="display:flex;gap:var(--sp-sm);align-items:center;">
+        <span class="material-icons" style="font-size:18px;color:var(--clr-secondary)">folder_special</span>
+        <input type="text" value="${escHtml(r.name)}" style="flex:1;min-width:140px;"
+               onchange="gpsUpdateRegion(${r.id},this.value)" title="Region name" />
+        <button class="btn-icon-delete" onclick="gpsDeleteRegion(${r.id})" title="Delete region (areas become unassigned)">
+          <span class="material-icons">delete</span>
+        </button>
+      </div>`;
+      /* Areas in this region */
+      const areas = (r.areas || []);
+      if (areas.length) {
+        for (const a of areas) {
+          const coordsLink = _gmapsLink(a.lat, a.lon, 'Map');
+          html += `<div style="display:flex;gap:var(--sp-xs);align-items:center;margin-top:var(--sp-xs);margin-left:28px;font-size:.82rem;flex-wrap:wrap;">
+            <span class="material-icons" style="font-size:14px;color:var(--clr-primary)">place</span>
+            <input type="text" value="${escHtml(a.geocoded_name)}" style="flex:1;min-width:100px;"
+                   onchange="gpsUpdateArea(${a.id},'geocoded_name',this.value)" title="Area name" />
+            <span style="white-space:nowrap;">${coordsLink}</span>
+            <input type="number" value="${a.radius_km}" min="0.1" step="0.5" style="width:100px;text-align:right;"
+                   onchange="gpsUpdateArea(${a.id},'radius_km',parseFloat(this.value))" title="Radius (km)" /> km
+            <button class="btn btn-outline" onclick="gpsUnassignArea(${a.id})" title="Remove from region" style="padding:10px 14px;">
+              <span class="material-icons" style="font-size:16px;color:var(--clr-warn)">link_off</span>
+            </button>
+          </div>`;
+        }
+      } else {
+        html += '<div style="margin-left:28px;font-size:.78rem;color:var(--clr-muted);margin-top:var(--sp-xs);">No areas assigned.</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('');
+  }
+
+  /* Unassigned areas */
+  const unassigned = _gpsAreasList.filter(a => !a.region_id);
+  if (unassigned.length) {
+    const regionOptions = _gpsRegionsList.map(r =>
+      `<option value="${r.id}">${escHtml(r.name)}</option>`
+    ).join('');
+    let html = '<div style="font-size:.82rem;color:var(--clr-muted);margin-bottom:var(--sp-xs);font-weight:500;">Unassigned Areas</div>';
+    for (const a of unassigned) {
+      const coordsLink = _gmapsLink(a.lat, a.lon, 'Map');
+      html += `<div style="display:flex;gap:var(--sp-xs);align-items:center;margin-bottom:var(--sp-xs);font-size:.82rem;flex-wrap:wrap;">
+        <span class="material-icons" style="font-size:16px;color:var(--clr-muted)">place</span>
+        <input type="text" value="${escHtml(a.geocoded_name)}" style="flex:1;min-width:100px;"
+               onchange="gpsUpdateArea(${a.id},'geocoded_name',this.value)" title="Area name" />
+        <span style="white-space:nowrap;">${coordsLink}</span>
+        <input type="number" value="${a.radius_km}" min="0.1" step="0.5" style="width:100px;text-align:right;"
+               onchange="gpsUpdateArea(${a.id},'radius_km',parseFloat(this.value))" title="Radius (km)" /> km
+        <select onchange="gpsAssignArea(${a.id},this.value)" title="Assign to region"
+                style="padding:10px 14px;font-size:.82rem;background:var(--clr-surface2);border:1px solid var(--clr-outline);border-radius:var(--radius);color:var(--clr-on-bg);">
+          <option value="">— assign to —</option>
+          ${regionOptions}
+        </select>
+        <button class="btn-icon-delete" onclick="gpsDeleteArea(${a.id})" title="Delete area">
+          <span class="material-icons">delete</span>
+        </button>
+      </div>`;
+    }
+    unContainer.innerHTML = html;
+  } else {
+    unContainer.innerHTML = '';
+  }
+
+  /* Update the add-area region dropdown */
+  _updateAddAreaRegionSelect();
+}
+
+function _updateAddAreaRegionSelect() {
+  const sel = document.getElementById('gps-new-area-region');
+  if (!sel) return;
+  const val = sel.value;
+  sel.innerHTML = '<option value="">— none —</option>'
+    + _gpsRegionsList.map(r => `<option value="${r.id}">${escHtml(r.name)}</option>`).join('');
+  sel.value = val;
+}
+
+/* ─── Region CRUD ────────────────────────────────────────────────── */
+
+async function gpsAddRegion() {
+  const inp = document.getElementById('gps-new-region-name');
+  const name = inp.value.trim();
+  if (!name) { alert('Please enter a region name.'); return; }
+  try {
+    const res = await fetch('/api/gps-sort/regions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+    if (!res.ok) { const d = await res.json(); alert(d.detail || 'Failed.'); return; }
+    inp.value = '';
+    await loadGpsData();
+    await gpsReclassify();
+  } catch (e) { alert('Error: ' + e); }
+}
+
+async function gpsUpdateRegion(id, name) {
+  if (!name.trim()) return;
+  try {
+    await fetch('/api/gps-sort/regions', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, name: name.trim()}),
+    });
+    await loadGpsData();
+    await gpsReclassify();
+  } catch (_) { /* ignore */ }
+}
+
+async function gpsDeleteRegion(id) {
+  if (!confirm('Delete this region? Its areas will become unassigned.')) return;
+  try {
+    await fetch('/api/gps-sort/regions', {
       method: 'DELETE',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({id}),
     });
-    await loadGpsAliases();
+    await loadGpsData();
+    await gpsReclassify();
   } catch (_) { /* ignore */ }
 }
 
-/* Load aliases once on first GPS tab activation */
+/* ─── Area CRUD ──────────────────────────────────────────────────── */
+
+async function gpsUpdateArea(id, field, value) {
+  try {
+    const payload = {id};
+    payload[field] = value;
+    await fetch('/api/gps-sort/areas', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    await loadGpsData();
+    await gpsReclassify();
+  } catch (_) { /* ignore */ }
+}
+
+async function gpsAssignArea(areaId, regionId) {
+  try {
+    await fetch('/api/gps-sort/areas', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: areaId, region_id: regionId ? parseInt(regionId) : null}),
+    });
+    await loadGpsData();
+    await gpsReclassify();
+  } catch (_) { /* ignore */ }
+}
+
+async function gpsUnassignArea(areaId) {
+  await gpsAssignArea(areaId, null);
+}
+
+async function gpsDeleteArea(id) {
+  try {
+    await fetch('/api/gps-sort/areas', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id}),
+    });
+    await loadGpsData();
+    await gpsReclassify();
+  } catch (_) { /* ignore */ }
+}
+
+async function gpsAddArea() {
+  const name = document.getElementById('gps-new-area-name').value.trim();
+  const url = document.getElementById('gps-new-area-url').value.trim();
+  const radius = parseFloat(document.getElementById('gps-new-area-radius').value) || 5.0;
+  const regionSel = document.getElementById('gps-new-area-region');
+  const regionId = regionSel.value ? parseInt(regionSel.value) : null;
+  if (!name) { alert('Please enter a name.'); return; }
+  if (!url) { alert('Please enter a Google Maps URL or lat,lon coordinates.'); return; }
+  try {
+    const res = await fetch('/api/gps-sort/areas', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({geocoded_name: name, url, radius_km: radius, region_id: regionId}),
+    });
+    if (!res.ok) { const d = await res.json(); alert(d.detail || 'Failed to add area.'); return; }
+    document.getElementById('gps-new-area-name').value = '';
+    document.getElementById('gps-new-area-url').value = '';
+    document.getElementById('gps-new-area-radius').value = '5';
+    regionSel.value = '';
+    await loadGpsData();
+    await gpsReclassify();
+  } catch (e) { alert('Error: ' + e); }
+}
+
+/* ─── Reclassify: lightweight re-evaluation against areas/regions ── */
+
+async function gpsReclassify() {
+  if (!_gpsSortPlan || !_gpsSortPlan.length) return;
+  try {
+    const res = await fetch('/api/gps-sort/reclassify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({plan: _gpsSortPlan}),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    _gpsSortPlan = data.plan;
+    _gpsNewAreas = data.new_areas || [];
+
+    const gpsCount = data.total - data.no_gps_count;
+    const newInfo = _gpsNewAreas.length ? ` ${_gpsNewAreas.length} new area(s) discovered.` : '';
+    showResult('gps-result',
+      `${data.total} file(s) found: ${gpsCount} with GPS, ${data.no_gps_count} without.${newInfo} Review below and confirm.`,
+      'success');
+
+    await loadGpsData();
+    renderGpsDetectedAreas();
+    renderGpsSortPreview(data.plan);
+  } catch (_) { /* ignore */ }
+}
+
+/* Load data once on first GPS tab activation */
 (function _watchGpsTab() {
   const obs = new MutationObserver(() => {
     const panel = document.getElementById('gps-sorter');
-    if (panel && panel.style.display !== 'none' && !_gpsAliasesLoaded) {
-      loadGpsAliases();
+    if (panel && panel.style.display !== 'none' && !_gpsDataLoaded) {
+      loadGpsData();
     }
   });
   const main = document.querySelector('main');
   if (main) obs.observe(main, {childList: true, subtree: true, attributes: true, attributeFilter:['style']});
-  setTimeout(() => { if (!_gpsAliasesLoaded) loadGpsAliases(); }, 200);
+  setTimeout(() => { if (!_gpsDataLoaded) loadGpsData(); }, 200);
 })();
 
 /* ─── Directory dialog ───────────────────────────────────────────── */
@@ -2164,7 +2574,7 @@ async function openGpsSortDirDialog() {
   }
 }
 
-/* ─── Preview with trip detection ────────────────────────────────── */
+/* ─── Preview with area detection ────────────────────────────────── */
 
 async function gpsSortPreview() {
   const dir = document.getElementById('gps-dir').value.trim();
@@ -2172,12 +2582,12 @@ async function gpsSortPreview() {
   localStorage.setItem('gps-dir', dir);
 
   _gpsSortPlan = null;
-  _gpsSortTrips = [];
-  document.getElementById('gps-trips-section').innerHTML = '';
+  _gpsNewAreas = [];
+  document.getElementById('gps-areas-section').innerHTML = '';
   document.getElementById('gps-preview').innerHTML = '';
 
   try {
-    showProgress('Scanning GPS Data…', 'Reading EXIF coordinates and timestamps…');
+    showProgress('Scanning GPS Data…', 'Reading EXIF coordinates and timestamps (recursively)…');
     const res = await fetch('/api/gps-sort/preview', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -2188,7 +2598,7 @@ async function gpsSortPreview() {
 
     const data = await res.json();
     _gpsSortPlan = data.plan;
-    _gpsSortTrips = data.trips || [];
+    _gpsNewAreas = data.new_areas || [];
 
     if (!data.plan.length) {
       showResult('gps-result', 'No files found in this directory.', 'success');
@@ -2196,12 +2606,13 @@ async function gpsSortPreview() {
     }
 
     const gpsCount = data.total - data.no_gps_count;
-    const tripInfo = _gpsSortTrips.length ? ` ${_gpsSortTrips.length} trip(s) detected.` : '';
+    const newInfo = _gpsNewAreas.length ? ` ${_gpsNewAreas.length} new area(s) discovered.` : '';
     showResult('gps-result',
-      `${data.total} file(s) found: ${gpsCount} with GPS, ${data.no_gps_count} without.${tripInfo} Review below and confirm.`,
+      `${data.total} file(s) found: ${gpsCount} with GPS, ${data.no_gps_count} without.${newInfo} Review below and confirm.`,
       'success');
 
-    renderGpsSortTrips();
+    await loadGpsData();
+    renderGpsDetectedAreas();
     renderGpsSortPreview(data.plan);
   } catch (e) {
     if (e.name === 'AbortError') return;
@@ -2209,28 +2620,72 @@ async function gpsSortPreview() {
   } finally { hideProgress(); }
 }
 
-/* ─── Render detected trips with editable names ──────────────────── */
+/* ─── Render detected areas card (after preview) ─────────────────── */
 
-function renderGpsSortTrips() {
-  const container = document.getElementById('gps-trips-section');
-  if (!_gpsSortTrips.length) { container.innerHTML = ''; return; }
+function renderGpsDetectedAreas() {
+  const container = document.getElementById('gps-areas-section');
+  const hasNoGps = _gpsSortPlan && _gpsSortPlan.some(e => e.group === 'no_gps');
+
+  /* Collect per-area stats from the plan */
+  const areaStats = {};
+  if (_gpsSortPlan) {
+    for (const e of _gpsSortPlan) {
+      if (e.area_id != null) {
+        if (!areaStats[e.area_id]) areaStats[e.area_id] = {count: 0, lat: null, lon: null, name: ''};
+        areaStats[e.area_id].count++;
+        areaStats[e.area_id].name = e.location_name || e.folder;
+        if (e.lat != null) { areaStats[e.area_id].lat = e.lat; areaStats[e.area_id].lon = e.lon; }
+      }
+    }
+  }
+  const hasAreas = Object.keys(areaStats).length > 0;
+  if (!hasAreas && !hasNoGps) { container.innerHTML = ''; return; }
 
   let html = '<div class="card">';
-  html += '<div class="card__title"><span class="material-icons">explore</span> Detected Trips</div>';
+  html += '<div class="card__title"><span class="material-icons">explore</span> Detected Areas</div>';
   html += '<p style="font-size:.8rem;color:var(--clr-muted);margin-bottom:var(--sp-sm);">'
-        + 'Name each trip below. The folder will use the name you provide.</p>';
+        + 'Areas are auto-discovered from GPS coordinates. Assign them to regions to merge '
+        + 'multiple areas under a single folder name, or leave them unassigned to use their '
+        + 'geocoded name as the folder.</p>';
 
-  for (const trip of _gpsSortTrips) {
-    const dateRange = trip.start_date === trip.end_date
-      ? trip.start_date
-      : `${trip.start_date} – ${trip.end_date}`;
+  /* Show area summaries */
+  const newAreaIds = new Set(_gpsNewAreas.map(a => a.id));
+  const regionOptions = _gpsRegionsList.map(r =>
+    `<option value="${r.id}">${escHtml(r.name)}</option>`
+  ).join('');
+
+  for (const [areaIdStr, stats] of Object.entries(areaStats)) {
+    const areaId = parseInt(areaIdStr);
+    const area = _gpsAreasList.find(a => a.id === areaId);
+    const isNew = newAreaIds.has(areaId);
+    const coordsLink = stats.lat != null ? _gmapsLink(stats.lat, stats.lon) : '';
+    const badge = isNew ? ' <span style="background:var(--clr-warn);color:#000;padding:1px 6px;border-radius:3px;font-size:.7rem;font-weight:600;">NEW</span>' : '';
+    const regionName = area && area.region_id ? (_gpsRegionsList.find(r => r.id === area.region_id) || {}).name : null;
+    const assignLabel = regionName
+      ? `<span style="font-size:.78rem;color:var(--clr-secondary);">→ ${escHtml(regionName)}</span>`
+      : `<select onchange="gpsAssignArea(${areaId},this.value);gpsReclassify();" title="Assign to region"
+                 style="padding:6px 10px;font-size:.78rem;background:var(--clr-surface2);border:1px solid var(--clr-outline);border-radius:var(--radius);color:var(--clr-on-bg);">
+           <option value="">— unassigned —</option>${regionOptions}</select>`;
+
     html += `<div style="display:flex;gap:var(--sp-sm);align-items:center;margin-bottom:var(--sp-sm);flex-wrap:wrap;">
-      <span class="material-icons" style="font-size:18px;color:var(--clr-primary)">flight</span>
-      <input type="text" id="trip-name-${trip.id}" value="${escHtml(trip.suggested_name)}"
-             style="flex:1;min-width:160px;" />
-      <span style="font-size:.8rem;color:var(--clr-muted);white-space:nowrap;">${trip.file_count} file(s) · ${dateRange}</span>
+      <span class="material-icons" style="font-size:18px;color:var(--clr-primary)">place</span>
+      <span style="flex:1;min-width:140px;font-weight:500;">${escHtml(stats.name)}${badge}</span>
+      <span style="font-size:.8rem;color:var(--clr-muted);white-space:nowrap;">${stats.count} file(s) · ${coordsLink}</span>
+      ${assignLabel}
     </div>`;
   }
+
+  /* No GPS folder name */
+  if (hasNoGps) {
+    const noGpsCount = _gpsSortPlan.filter(e => e.group === 'no_gps').length;
+    html += `<div style="display:flex;gap:var(--sp-sm);align-items:center;margin-bottom:var(--sp-sm);flex-wrap:wrap;">
+      <span class="material-icons" style="font-size:18px;color:var(--clr-muted)">gps_off</span>
+      <input type="text" id="no-gps-name" value="No GPS"
+             style="flex:1;min-width:160px;" />
+      <span style="font-size:.8rem;color:var(--clr-muted);white-space:nowrap;">${noGpsCount} file(s) &middot; no coordinates</span>
+    </div>`;
+  }
+
   html += '</div>';
   container.innerHTML = html;
 }
@@ -2265,16 +2720,21 @@ function renderGpsSortPreview(plan) {
   for (const folder of sortedFolders) {
     for (const entry of groups[folder]) {
       const coords = (entry.lat !== null && entry.lon !== null)
-        ? `${entry.lat.toFixed(4)}°, ${entry.lon.toFixed(4)}°`
+        ? _gmapsLink(entry.lat, entry.lon)
         : '—';
-      const groupLabel = entry.group === 'trip' ? '<span style="color:var(--clr-warn)">Trip</span>'
-        : entry.group === 'location' ? '<span style="color:var(--clr-secondary)">Location</span>'
+      const groupLabel = entry.group === 'region'
+        ? '<span style="color:var(--clr-secondary)">Region</span>'
+        : entry.group === 'area'
+        ? '<span style="color:var(--clr-warn)">Area</span>'
         : '<span style="color:var(--clr-muted)">No GPS</span>';
+      const fileLink = `<a href="#" onclick="_openPath('${_escJs(entry.source)}');return false;" style="color:var(--clr-on-surface);text-decoration:none;" title="Open file">${_esc(entry.file)}</a>`;
+      const destDir = entry.destination.replace(/[/\\][^/\\]+$/, '');
+      const folderLink = `<a href="#" onclick="_openPath('${_escJs(destDir)}');return false;" style="color:var(--clr-primary);text-decoration:none;" title="Open folder">${_esc(entry.folder)}</a>`;
       html += '<tr style="border-bottom:1px solid var(--clr-outline);">'
-            + '<td style="padding:6px 12px;color:var(--clr-on-surface);">' + _esc(entry.file) + '</td>'
-            + '<td style="padding:6px 12px;color:var(--clr-muted);">' + coords + '</td>'
+            + '<td style="padding:6px 12px;">' + fileLink + '</td>'
+            + '<td style="padding:6px 12px;">' + coords + '</td>'
             + '<td style="padding:6px 12px;">' + groupLabel + '</td>'
-            + '<td style="padding:6px 12px;color:var(--clr-primary);">' + _esc(entry.folder) + '</td>'
+            + '<td style="padding:6px 12px;">' + folderLink + '</td>'
             + '</tr>';
     }
   }
@@ -2292,7 +2752,7 @@ function renderGpsSortPreview(plan) {
   container.appendChild(table);
 }
 
-/* ─── Execute with trip names ────────────────────────────────────── */
+/* ─── Execute sort ───────────────────────────────────────────────── */
 
 async function gpsSortExecute() {
   if (!_gpsSortPlan || !_gpsSortPlan.length) {
@@ -2300,37 +2760,396 @@ async function gpsSortExecute() {
     return;
   }
 
-  /* Collect user-provided trip names */
-  const trip_names = {};
-  for (const trip of _gpsSortTrips) {
-    const input = document.getElementById('trip-name-' + trip.id);
-    if (input) trip_names[String(trip.id)] = input.value.trim() || trip.suggested_name;
-  }
+  /* Collect "No GPS" folder name */
+  const noGpsInput = document.getElementById('no-gps-name');
+  const no_gps_name = noGpsInput ? noGpsInput.value.trim() : '';
 
   try {
     showProgress('Sorting Files…', 'Moving files into location folders…');
     const res = await fetch('/api/gps-sort/execute', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ plan: _gpsSortPlan, trip_names }),
+      body: JSON.stringify({ plan: _gpsSortPlan, no_gps_name }),
       signal: getAbortSignal(),
     });
     if (!res.ok) { showResult('gps-result', await errorDetail(res), 'error'); return; }
 
     const data = await res.json();
     _gpsSortPlan = null;
-    _gpsSortTrips = [];
-    document.getElementById('gps-trips-section').innerHTML = '';
+    _gpsNewAreas = [];
+    document.getElementById('gps-areas-section').innerHTML = '';
     document.getElementById('gps-preview').innerHTML = '';
     showResult('gps-result',
       'Done! ' + data.moved + ' file' + (data.moved === 1 ? '' : 's') + ' sorted into location folders.',
       'success');
-    /* Reload aliases – execute may have saved new ones */
-    loadGpsAliases();
+    await loadGpsData();
   } catch (e) {
     if (e.name === 'AbortError') return;
     showResult('gps-result', 'Sort failed: ' + e, 'error');
   } finally { hideProgress(); }
+}
+
+/* ╔═══════════════════════════════════════════════════════════════════╗ */
+/* ║  PDF 2 DCM                                                      ║ */
+/* ╚═══════════════════════════════════════════════════════════════════╝ */
+
+/* ── State ─────────────────────────────────────────────────────────── */
+let _dcmCommonTags = [];
+let _dcmTags = {};            // keyword → value
+let _dcmPdfFile = null;       // File object (browser) or path string (desktop)
+let _dcmTemplateFile = null;  // File object (browser) or path string (desktop)
+let _dcmTagsLoaded = false;
+
+/* ── Load common tags from server ─────────────────────────────────── */
+async function dcmLoadTags() {
+  if (_dcmTagsLoaded) return;
+  try {
+    const r = await fetch('/api/pdf2dcm/tags');
+    if (r.ok) {
+      const d = await r.json();
+      _dcmCommonTags = d.tags || [];
+      const sel = document.getElementById('dcm-tag-select');
+      sel.innerHTML = '';
+      _dcmCommonTags.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.keyword;
+        opt.textContent = t.label + ' (' + t.keyword + ')';
+        sel.appendChild(opt);
+      });
+      // Custom tag option
+      const custom = document.createElement('option');
+      custom.value = '__custom__';
+      custom.textContent = '— Custom tag keyword —';
+      sel.appendChild(custom);
+      _dcmTagsLoaded = true;
+    }
+  } catch { /* ignore */ }
+}
+
+/* ── Browse PDF ────────────────────────────────────────────────────── */
+async function dcmBrowsePdf() {
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    try {
+      const r = await fetch('/api/dialog/files?multiple=false');
+      if (r.ok) {
+        const d = await r.json();
+        if (d.files && d.files.length) {
+          _dcmPdfFile = d.files[0];
+          document.getElementById('dcm-pdf-path').value = d.files[0];
+          localStorage.setItem('dcm-pdf-path', d.files[0]);
+        }
+      }
+    } catch { /* ignore */ }
+  } else {
+    document.getElementById('dcm-pdf-file').click();
+  }
+}
+
+/* ── Handle browser file input for PDF ─────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  const pdfInput = document.getElementById('dcm-pdf-file');
+  if (pdfInput) pdfInput.addEventListener('change', () => {
+    if (pdfInput.files.length) {
+      _dcmPdfFile = pdfInput.files[0];
+      document.getElementById('dcm-pdf-path').value = pdfInput.files[0].name;
+    }
+  });
+  const tmplInput = document.getElementById('dcm-template-file');
+  if (tmplInput) tmplInput.addEventListener('change', () => {
+    if (tmplInput.files.length) {
+      _dcmTemplateFile = tmplInput.files[0];
+      document.getElementById('dcm-template-path').value = tmplInput.files[0].name;
+    }
+  });
+
+  /* Restore remembered file selections (desktop paths) */
+  const savedPdf = localStorage.getItem('dcm-pdf-path');
+  if (savedPdf) {
+    _dcmPdfFile = savedPdf;
+    document.getElementById('dcm-pdf-path').value = savedPdf;
+  }
+  const savedTmpl = localStorage.getItem('dcm-template-path');
+  if (savedTmpl) {
+    _dcmTemplateFile = savedTmpl;
+    document.getElementById('dcm-template-path').value = savedTmpl;
+  }
+});
+
+/* ── Browse template ───────────────────────────────────────────────── */
+async function dcmBrowseTemplate() {
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    try {
+      const r = await fetch('/api/dialog/files?multiple=false&file_types=' + encodeURIComponent('All Files (*.*)'));
+      if (r.ok) {
+        const d = await r.json();
+        if (d.files && d.files.length) {
+          _dcmTemplateFile = d.files[0];
+          document.getElementById('dcm-template-path').value = d.files[0];
+          localStorage.setItem('dcm-template-path', d.files[0]);
+        }
+      }
+    } catch { /* ignore */ }
+  } else {
+    document.getElementById('dcm-template-file').click();
+  }
+}
+
+/* ── Clear template ────────────────────────────────────────────────── */
+function dcmClearTemplate() {
+  _dcmTemplateFile = null;
+  document.getElementById('dcm-template-path').value = '';
+  document.getElementById('dcm-template-file').value = '';
+  localStorage.removeItem('dcm-template-path');
+}
+
+/* ── Add tag ───────────────────────────────────────────────────────── */
+function dcmAddTag() {
+  const sel = document.getElementById('dcm-tag-select');
+  const valInput = document.getElementById('dcm-tag-value');
+  let keyword = sel.value;
+  const value = valInput.value;
+
+  if (keyword === '__custom__') {
+    keyword = prompt('Enter DICOM keyword (e.g. PatientName):');
+    if (!keyword) return;
+  }
+  if (!keyword) return;
+
+  _dcmTags[keyword] = value;
+  dcmRenderTags();
+  valInput.value = '';
+
+  // Pre-fill default for next selected tag
+  dcmOnTagSelectChange();
+}
+
+/* ── Remove tag ────────────────────────────────────────────────────── */
+function dcmRemoveTag(keyword) {
+  delete _dcmTags[keyword];
+  dcmRenderTags();
+}
+
+/* ── Update tag value inline ───────────────────────────────────────── */
+function dcmUpdateTagValue(keyword, newValue) {
+  _dcmTags[keyword] = newValue;
+}
+
+/* ── Render tags list ──────────────────────────────────────────────── */
+function dcmRenderTags() {
+  const container = document.getElementById('dcm-tags-list');
+  if (Object.keys(_dcmTags).length === 0) {
+    container.innerHTML = '<div style="font-size:.82rem;color:var(--clr-muted);padding:var(--sp-xs);">No tags added yet. Use the dropdown below to add DICOM tags.</div>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:.85rem;">';
+  html += '<tr style="color:var(--clr-muted);border-bottom:1px solid var(--clr-outline);">' +
+           '<th style="text-align:left;padding:6px 8px;">Tag</th>' +
+           '<th style="text-align:left;padding:6px 8px;">Value</th>' +
+           '<th style="width:40px;"></th></tr>';
+  for (const [kw, val] of Object.entries(_dcmTags)) {
+    const label = _dcmCommonTags.find(t => t.keyword === kw);
+    const display = label ? label.label : kw;
+    html += '<tr style="border-bottom:1px solid var(--clr-outline);">';
+    html += '<td style="padding:6px 8px;color:var(--clr-muted);" title="' + escHtml(kw) + '">' + escHtml(display) + '</td>';
+    html += '<td style="padding:4px 8px;"><input type="text" value="' + escHtml(val) + '" ' +
+            'onchange="dcmUpdateTagValue(\'' + escHtml(kw) + '\', this.value)" ' +
+            'style="width:100%;padding:6px 8px;font-size:.85rem;" /></td>';
+    html += '<td style="padding:4px;text-align:center;">' +
+            '<button class="btn-icon-delete" onclick="dcmRemoveTag(\'' + escHtml(kw) + '\')" ' +
+            'title="Remove">' +
+            '<span class="material-icons">delete</span></button></td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+  container.innerHTML = html;
+}
+
+/* ── Pre-fill default when dropdown changes ────────────────────────── */
+function dcmOnTagSelectChange() {
+  const sel = document.getElementById('dcm-tag-select');
+  const valInput = document.getElementById('dcm-tag-value');
+  const tag = _dcmCommonTags.find(t => t.keyword === sel.value);
+  if (tag && tag.default) {
+    valInput.value = tag.default;
+  } else {
+    valInput.value = '';
+  }
+}
+
+/* -- Tag configurations (DB-backed) -------------------------------- */
+let _dcmConfigs = [];
+
+async function dcmRefreshConfigs() {
+  try {
+    const r = await fetch('/api/pdf2dcm/configs');
+    if (!r.ok) return;
+    const data = await r.json();
+    _dcmConfigs = data.configs || [];
+  } catch { _dcmConfigs = []; }
+  const dl = document.getElementById('dcm-config-datalist');
+  dl.innerHTML = '';
+  for (const c of _dcmConfigs) {
+    dl.innerHTML += '<option value="' + escHtml(c.name) + '">';
+  }
+}
+
+async function dcmLoadConfig() {
+  const name = document.getElementById('dcm-config-name').value.trim();
+  if (!name) { showResult('dcm-result', 'Enter or select a configuration name.', 'error'); return; }
+  const cfg = _dcmConfigs.find(c => c.name === name);
+  if (!cfg) { showResult('dcm-result', 'Configuration not found: ' + name, 'error'); return; }
+  _dcmTags = {...cfg.tags};
+  dcmRenderTags();
+  showResult('dcm-result', 'Loaded configuration: ' + name, 'success');
+}
+
+async function dcmSaveConfig() {
+  const name = document.getElementById('dcm-config-name').value.trim();
+  if (!name) {
+    showResult('dcm-result', 'Enter a configuration name.', 'error');
+    return;
+  }
+  try {
+    const r = await fetch('/api/pdf2dcm/configs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, tags: _dcmTags }),
+    });
+    if (!r.ok) { showResult('dcm-result', await errorDetail(r), 'error'); return; }
+    await dcmRefreshConfigs();
+    showResult('dcm-result', 'Configuration saved: ' + name, 'success');
+  } catch (e) {
+    showResult('dcm-result', 'Save failed: ' + e, 'error');
+  }
+}
+
+async function dcmDeleteConfig() {
+  const name = document.getElementById('dcm-config-name').value.trim();
+  if (!name) return;
+  const cfg = _dcmConfigs.find(c => c.name === name);
+  if (!cfg) { showResult('dcm-result', 'Configuration not found: ' + name, 'error'); return; }
+  if (!confirm('Delete configuration "' + name + '"?')) return;
+  try {
+    const r = await fetch('/api/pdf2dcm/configs/' + cfg.id, { method: 'DELETE' });
+    if (!r.ok) { showResult('dcm-result', await errorDetail(r), 'error'); return; }
+    document.getElementById('dcm-config-name').value = '';
+    await dcmRefreshConfigs();
+    showResult('dcm-result', 'Configuration deleted.', 'success');
+  } catch (e) {
+    showResult('dcm-result', 'Delete failed: ' + e, 'error');
+  }
+}
+
+/* ── Generate DCM ──────────────────────────────────────────────────── */
+async function dcmGenerate() {
+  if (!_dcmPdfFile) {
+    showResult('dcm-result', 'Please select a PDF file first.', 'error');
+    return;
+  }
+
+  await dcmLoadTags();  // ensure tags are loaded
+
+  const isDesktop = await _detectDesktop();
+
+  // Determine default name for save dialog
+  let pdfName = '';
+  if (typeof _dcmPdfFile === 'string') {
+    // Desktop path
+    const parts = _dcmPdfFile.replace(/\\/g, '/').split('/');
+    pdfName = parts[parts.length - 1];
+  } else {
+    pdfName = _dcmPdfFile.name;
+  }
+  const defaultDcmName = pdfName.replace(/\.pdf$/i, '') + '.dcm';
+
+  showResult('dcm-result', 'Converting…', '');
+
+  try {
+    if (isDesktop && typeof _dcmPdfFile === 'string') {
+      // Desktop mode: use server-side convert-desktop endpoint with save dialog
+      const dlg = await fetch('/api/dialog/save?filename=' + encodeURIComponent(defaultDcmName) +
+        '&file_types=' + encodeURIComponent('DICOM Files (*.dcm);All Files (*.*)'));
+      if (!dlg.ok) { showResult('dcm-result', 'Save dialog failed.', 'error'); return; }
+      const { path } = await dlg.json();
+      if (!path) { showResult('dcm-result', 'Save cancelled.', ''); return; }
+
+      const body = {
+        pdf_path: _dcmPdfFile,
+        output_path: path,
+        template_path: typeof _dcmTemplateFile === 'string' ? _dcmTemplateFile : null,
+        tags: _dcmTags,
+      };
+      const r = await fetch('/api/pdf2dcm/convert-desktop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { showResult('dcm-result', await errorDetail(r), 'error'); return; }
+      const data = await r.json();
+      showResult('dcm-result', 'Saved: ' + data.saved, 'success');
+      if (document.getElementById('dcm-open-after').checked) {
+        const folder = data.saved.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+        if (folder) await _openPath(folder);
+      }
+    } else {
+      // Browser mode: upload PDF + template, get DCM blob back, trigger download
+      const fd = new FormData();
+      fd.append('pdf', _dcmPdfFile instanceof File ? _dcmPdfFile : new Blob());
+      if (_dcmTemplateFile instanceof File) {
+        fd.append('template', _dcmTemplateFile);
+      }
+      fd.append('tags_json', JSON.stringify(_dcmTags));
+
+      const r = await fetch('/api/pdf2dcm/convert', { method: 'POST', body: fd });
+      if (!r.ok) { showResult('dcm-result', await errorDetail(r), 'error'); return; }
+
+      const blob = await r.blob();
+
+      // Check if desktop save dialog is available
+      if (isDesktop) {
+        const saved = await _desktopSave(blob, defaultDcmName);
+        if (saved) {
+          showResult('dcm-result', 'Saved: ' + saved, 'success');
+          if (document.getElementById('dcm-open-after').checked) {
+            const folder = saved.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+            if (folder) await _openPath(folder);
+          }
+        } else {
+          showResult('dcm-result', 'Save cancelled.', '');
+        }
+      } else {
+        // Browser download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = defaultDcmName;
+        a.click();
+        URL.revokeObjectURL(url);
+        showResult('dcm-result', 'Downloaded: ' + defaultDcmName, 'success');
+      }
+    }
+  } catch (e) {
+    showResult('dcm-result', 'Conversion failed: ' + e, 'error');
+  }
+}
+
+/* ── Init: load tags when PDF2DCM tab is first shown ───────────────── */
+{
+  const origSwitch = switchTab;
+  switchTab = function(id) {
+    origSwitch(id);
+    if (id === 'pdf2dcm' && !_dcmTagsLoaded) {
+      dcmLoadTags().then(() => {
+        dcmRenderTags();
+        dcmRefreshConfigs();
+        // Attach change listener
+        const sel = document.getElementById('dcm-tag-select');
+        if (sel) sel.addEventListener('change', dcmOnTagSelectChange);
+      });
+    }
+  };
 }
 </script>
 </body>
