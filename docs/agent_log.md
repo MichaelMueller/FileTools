@@ -1,5 +1,33 @@
 # Agent Log
 
+## 2026-02-27 21:15 – Hide GPS Sorter from main menu
+
+### Summary
+Commented out the GPS Sorter tab button in the navigation bar to hide it for this release. All backend code, panel HTML, and tests remain in place.
+
+### Changes
+- **`file_tools/static/index.html`**: Wrapped the `tab-gps-sorter` button in an HTML comment.
+
+---
+
+## 2026-02-27 21:00 – Version 1.3.0 release & installer build
+
+### Summary
+Bumped version to 1.3.0, committed, pushed, and built the Windows NSIS installer. Fixed a blocking issue where pythonnet (required by pywebview) cannot be installed via pip on Python >= 3.14 (no compatible wheels on PyPI). The installer builder now uses a two-phase approach: pre-seeds pythonnet and its transitive deps (clr_loader, cffi, pycparser) from the project's `.venv`, then freezes the dev environment and installs all other deps with `--no-deps` to bypass pip's dependency resolver entirely.
+
+### Changes
+
+- **`pyproject.toml`**, **`file_tools/__init__.py`**, **`file_tools/main.py`**, **`file_tools/tools/installer_builder.py`**: Version bumped 1.2.0 → 1.3.0
+- **`file_tools/tools/installer_builder.py`** (`_install_deps()`):
+  - Sources pre-seeded packages from project `.venv` instead of `sys.prefix` (system Python)
+  - Freezes dev venv to generate a full transitive dependency list
+  - Filters out pre-seeded packages (pythonnet, cffi, clr_loader, pycparser) and meta packages
+  - Uses `pip install --no-deps -r requirements.txt` for deps + `pip install --no-deps .` for the project
+- **Output**: `build/FileTools-1.3.0-Setup.exe` (~96 MB)
+- **Git**: Commit f4733c5, pushed to origin/main
+
+---
+
 ## 2026-02-27 18:30 – Harmonize delete/remove buttons with trash icon
 
 ### Summary

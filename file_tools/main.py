@@ -29,7 +29,7 @@ from file_tools.tools.pdf2dcm import Pdf2Dcm
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="FileTools", version="1.3.0")
+app = FastAPI(title="FileTools", version="1.3.1")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
