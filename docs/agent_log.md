@@ -1,5 +1,33 @@
 # Agent Log
 
+## 2026-03-03 14:49 – Remove GPS Sorter, bump to v1.3.5, rebuild installer
+
+### Summary
+Removed all GPS Sorter code from the codebase. Bumped version to 1.3.5. Clean rebuild produced `FileTools-1.3.5-Setup.exe` (71.76 MB).
+
+### Changes
+- **Deleted** `file_tools/tools/gps_sorter.py`, `gps_sorter.py.bak`, `file_tools/tests/test_gps_sorter.py`
+- **`file_tools/main.py`** – Removed GPS import, `_gps_db_url` variable, and all GPS API endpoints (~210 lines)
+- **`file_tools/static/index.html`** – Removed GPS tab button, GPS HTML section, GPS JavaScript (~650 lines)
+- **`file_tools/tests/test_main.py`** – Removed all GPS endpoint tests (~440 lines)
+- **`pyproject.toml`** – Removed `reverse_geocoder` dependency, version → 1.3.5
+- **`file_tools/tools/installer_builder.py`** – `APP_VERSION` → 1.3.5
+- **`build/FileTools-1.3.5-Setup.exe`** – 71.76 MB
+
+---
+
+## 2026-03-03 12:15 – Version bump to 1.3.4 & clean rebuild
+
+### Summary
+Bumped version from 1.3.1 to 1.3.4 in `pyproject.toml` and `installer_builder.py`. Committed, tagged `v1.3.4`, pushed. Clean rebuild produced `FileTools-1.3.4-Setup.exe` (71.81 MB).
+
+### Changes
+- **`pyproject.toml`** – version → 1.3.4
+- **`file_tools/tools/installer_builder.py`** – `APP_VERSION` → 1.3.4
+- **`build/FileTools-1.3.4-Setup.exe`** – 71.81 MB
+
+---
+
 ## 2026-03-03 12:00 – Clean rebuild of installer
 
 ### Summary
@@ -98,16 +126,6 @@ Bumped version to 1.3.1, tagged `v1.3.1`, committed, pushed, and built installer
 
 ---
 
-## 2026-02-27 21:15 – Hide GPS Sorter from main menu
-
-### Summary
-Commented out the GPS Sorter tab button in the navigation bar to hide it for this release. All backend code, panel HTML, and tests remain in place.
-
-### Changes
-- **`file_tools/static/index.html`**: Wrapped the `tab-gps-sorter` button in an HTML comment.
-
----
-
 ## 2026-02-27 21:00 – Version 1.3.0 release & installer build
 
 ### Summary
@@ -139,8 +157,6 @@ Created a unified `btn-icon-delete` CSS class for all delete/remove buttons acro
   - **PDF 2 DCM template clear**: changed from `btn btn-outline` + `clear` icon to `btn-icon-delete` + `delete`
   - **PDF 2 DCM tag remove**: changed from `btn btn-outline` + `close` icon to `btn-icon-delete` + `delete`
   - **PDF 2 DCM config delete**: changed from `btn btn-outline` + `delete` icon (14px, inline color) to `btn-icon-delete` + `delete` (unified)
-  - **GPS Sorter region delete**: changed from `btn btn-outline` + `close` icon to `btn-icon-delete` + `delete`
-  - **GPS Sorter area delete**: changed from `btn btn-outline` + `close` icon to `btn-icon-delete` + `delete`
 
 ---
 
@@ -189,10 +205,10 @@ PDF and template file paths selected in the PDF 2 DCM tool are now persisted acr
 
 ---
 
-## 2026-02-27 17:30 – UI polish: button heights, config layout, GPS radius
+## 2026-02-27 17:30 – UI polish: button heights, config layout
 
 ### Summary
-Moved config manager below tag editor with visual splitter. Replaced separate select+text input with an editable `<datalist>` combo. Matched all button heights to text field heights project-wide. Widened GPS radius input fields.
+Moved config manager below tag editor with visual splitter. Replaced separate select+text input with an editable `<datalist>` combo. Matched all button heights to text field heights project-wide.
 
 ### Changes
 
@@ -205,10 +221,6 @@ Moved config manager below tag editor with visual splitter. Replaced separate se
   - Replaced `<select>` dropdown + separate name input with a single editable `<input>` backed by `<datalist>` — user can type a new name or select from saved ones.
   - Removed the old Load/Save/Delete button row with select+input; replaced with a cleaner single-row layout.
   - Config JS functions now use `dcm-config-datalist` instead of `dcm-config-select`.
-
-- **GPS Sorter** (`index.html`):
-  - Radius input `min-width` changed from `80px` to `100px` in the "Add Area" form.
-  - Radius input `width` changed from `70px` to `100px` in both region-assigned and unassigned area listings.
 
 ## 2026-02-27 17:00 – PDF 2 DCM: Always-visible tags, named configs, Open Folder
 
@@ -298,151 +310,12 @@ Added a new "PDF 2 DCM" tool that converts PDF files into DICOM Encapsulated PDF
 - **API tests** (`file_tools/tests/test_main.py` — 10 new test functions):
   - `test_pdf2dcm_tags`, `test_pdf2dcm_convert`, `test_pdf2dcm_convert_with_template`, `test_pdf2dcm_convert_empty_pdf`, `test_pdf2dcm_convert_bad_tags_json`, `test_pdf2dcm_convert_desktop`, `test_pdf2dcm_convert_desktop_missing_pdf`, `test_pdf2dcm_convert_desktop_missing_output`, `test_pdf2dcm_convert_desktop_file_not_found`, `test_pdf2dcm_convert_desktop_conversion_error`.
 
-## 2026-02-27 14:00 – Region & Area data model rewrite + backslash fix + recursive scanning
-
-### Summary
-Complete redesign of GPS location management: replaced flat alias system with hierarchical **Area + Region** model. Fixed image-click bug caused by unescaped backslashes. Added recursive directory scanning. Rewrote all tests.
-
-### Changes
-
-- **Data model** (`gps_sorter.py` — full rewrite, 781 lines):
-  - `RegionAliasRow` removed. Replaced with `RegionRow` (id, name) + `AreaRow` (id, geocoded_name, lat, lon, radius_km, region_id FK).
-  - **Area** = auto-discovered GPS location (geocoded name + coords + radius). **Region** = user-defined grouping of areas.
-  - Files in region-assigned areas → region folder. Unassigned areas → geocoded_name folder. New areas from scans start unassigned.
-  - `_match_area()` replaces `_match_alias()`, returns full area dict.
-  - `_build_plan()` shared logic for preview/reclassify: classify → cluster → reverse-geocode → auto-create areas → assign files → set destinations.
-  - `_migrate_legacy_aliases()` migrates old `gps_region_aliases` table → creates region + area per old alias.
-  - Region CRUD: `get_regions()`, `add_region()`, `update_region()`, `delete_region()` (unassigns areas).
-  - Area CRUD: `get_areas()`, `add_area()`, `update_area()` (uses `...` sentinel for region_id), `delete_area()`.
-  - `preview()` now uses `rglob("*")` for recursive scanning (default `recursive=True`).
-  - `execute()` simplified — no more `trip_names` parameter.
-
-- **API** (`main.py` — GPS section fully replaced):
-  - Old endpoints removed: GET/POST/PUT/DELETE `/api/gps-sort/aliases`.
-  - New endpoints: GET/POST/PUT/DELETE `/api/gps-sort/regions`, GET/POST/PUT/DELETE `/api/gps-sort/areas`.
-  - Preview returns `new_areas` instead of `trips`.
-  - Execute accepts only `no_gps_name`, no more `trip_names`.
-
-- **Frontend** (`index.html` — GPS HTML + JS sections fully rewritten):
-  - New "Regions & Areas" management UI with collapsible `<details>` sections.
-  - `_escJs()` helper escapes `\` → `\\` and `'` → `\'` for safe onclick strings — **fixes image-click bug**.
-  - New functions: `loadGpsData()`, `renderGpsRegionsAndAreas()`, region/area CRUD, `renderGpsDetectedAreas()`, `renderGpsSortPreview()`.
-  - All alias mutations now call region/area endpoints and trigger reclassify.
-
-- **Tests** (`test_gps_sorter.py` — full rewrite, ~630 lines):
-  - Preserved: TestDmsToDecimal, TestHaversine, TestGpsCoordinates, TestReverseGeocode, TestParseGoogleMapsUrl, TestSanitiseFolder, TestFileTimestamp.
-  - New: TestMatchArea, TestRegionCrud (9 tests), TestAreaCrud (15 tests), TestPreview (18 tests), TestReclassify (5 tests), TestExecute (13 tests), TestLegacyMigration (2 tests).
-
-- **Tests** (`test_main.py` — GPS section replaced):
-  - Replaced all alias endpoint tests with region/area endpoint tests.
-  - Updated preview/reclassify/execute tests for new data structures (new_areas, area_id, no trip_names).
-
-## 2026-02-27 10:30 – Uniform input sizing in alias list
-
-- **CSS**: Added `input[type="number"]` to the global input rule so number fields inherit the same `padding`, `font-size`, `border`, `border-radius`, and `background` as text inputs.
-- **Frontend** (`index.html`): Removed small inline sizing overrides from lat/lon/radius inputs and the delete button. All now match the text field height. Delete button uses `padding:10px 14px` and a larger icon (`18px`).
-
-## 2026-02-27 10:15 – Make all alias attributes editable
-
-- **Backend** (`gps_sorter.py`): Extended `update_alias()` with `original_name` parameter (uses `...` sentinel so callers can set it to `None`).
-- **API** (`main.py`): Updated `PUT /api/gps-sort/aliases` to handle `original_name` alongside `alias`, `lat`, `lon`, `radius_km`. String fields allow `None` values.
-- **Frontend** (`index.html`):
-  - Redesigned `renderGpsAliases()`: all five fields (name, original location, lat, lon, radius) are now inline-editable inputs.
-  - Unified `gpsUpdateAliasRadius` / `gpsUpdateAliasName` into a single `gpsUpdateAlias(id, field, value)` function.
-  - Coordinates shown as editable number inputs with a Google Maps link beside them.
-- **Tests**: Added `test_update_alias_original_name`, `test_update_alias_coordinates` (backend), `test_gps_sort_aliases_update_original_name`, `test_gps_sort_aliases_update_coords` (API).
-
-## 2026-02-27 09:30 – Reclassify on alias changes, editable alias regions
-
-- **Backend** (`gps_sorter.py`): New `reclassify(plan)` method — re-evaluates an existing plan against current aliases without re-scanning files for GPS data. Runs phases 3-8 (classify, trip grouping, reverse-geocode, metadata, folder names, destinations) on already-extracted lat/lon coordinates.
-- **API** (`main.py`): New `POST /api/gps-sort/reclassify` endpoint — accepts the current plan and returns a fresh classification.
-- **Frontend** (`index.html`):
-  - New `gpsReclassify()` function calls the reclassify endpoint and updates the UI (plan, trips, preview table).
-  - All alias mutations (delete, update radius, add alias, add trip alias) now trigger `gpsReclassify()` instead of a full `gpsSortPreview()` rescan.
-  - New `gpsUpdateAliasName(id, newName)` function — renames an alias via PUT and reclassifies.
-  - `renderGpsSortTrips()` now also collects and displays alias-matched regions from the plan with editable name inputs (icon `bookmark`, color `--clr-secondary`), showing file count and coords. Renaming triggers `gpsUpdateAliasName` which reclassifies.
-- **Tests**: Added `TestReclassify` class in `test_gps_sorter.py` (4 tests: matches new alias, preserves source, sets destinations, empty plan). Added 2 API tests in `test_main.py` (`test_gps_sort_reclassify_success`, `test_gps_sort_reclassify_empty`).
-
-## 2026-02-27 09:05 – Detected Regions: "Add Alias" button with auto-refresh
-
-- **Frontend** (`index.html`):
-  - Added `_gpsAliasesList` global to cache loaded aliases for proximity checks.
-  - `loadGpsAliases()` now stores the alias list in `_gpsAliasesList`.
-  - `renderGpsSortTrips()`: Each detected region shows a `bookmark_add` "Add Alias" button unless an alias already exists within ~0.5° of the trip's centroid.
-  - New `gpsAddTripAlias(tripId)` function: creates an alias from the trip's name (from the input field), centroid, and radius, then refreshes both aliases and the full preview so the region switches from "New" to "Alias".
-
 ## 2026-02-27 08:45 – Move persistent storage to OS user app data directory
 
-- **`gps_sorter.py`** and **`dedup_scanner.py`**: Changed default DB path from app-relative `data/` to the OS-standard user data directory via `platformdirs.user_data_dir("FileTools")`. On Windows this resolves to `%LOCALAPPDATA%\FileTools`, on Linux `~/.local/share/FileTools`, on macOS `~/Library/Application Support/FileTools`. Directory is created automatically with `parents=True`.
+- **`dedup_scanner.py`**: Changed default DB path from app-relative `data/` to the OS-standard user data directory via `platformdirs.user_data_dir("FileTools")`. On Windows this resolves to `%LOCALAPPDATA%\FileTools`, on Linux `~/.local/share/FileTools`, on macOS `~/Library/Application Support/FileTools`. Directory is created automatically with `parents=True`.
 - **`pyproject.toml`**: Added `platformdirs>=4.0.0` to dependencies.
 - Reverted `.gitignore` change for `file_tools/data/` (no longer needed).
 - Removed old DB files from system temp directory.
-
-## 2026-02-27 08:24 – GPS Sorter: Region management, clickable UI, Google Maps integration
-
-- **Database model** (`gps_sorter.py`): Added `original_name` column to `RegionAliasRow` (nullable, stores the raw reverse-geocoded name before the user renames it).
-- **New methods** (`gps_sorter.py`):
-  - `add_alias(alias, lat, lon, radius_km, original_name)` — directly create a region alias via public API.
-  - `update_alias(alias_id, *, alias, lat, lon, radius_km)` — update specific fields of an existing alias by id, returns updated dict or None.
-  - `parse_google_maps_url(url)` — static method, parses `@lat,lon`, `?q=lat,lon`, `?ll=lat,lon`, and plain `lat,lon` coordinate strings. Returns `(lat, lon)` or `None`.
-- **Updated methods** (`gps_sorter.py`): `_save_alias()` accepts `original_name` parameter, `_alias_to_dict()` includes `original_name`, `execute()` passes `original_name` from `location_name` when saving trip aliases.
-- **New API endpoints** (`main.py`):
-  - `POST /api/gps-sort/aliases` — create alias with lat/lon or Google Maps URL.
-  - `PUT /api/gps-sort/aliases` — update alias fields (alias name, radius, coords).
-  - `POST /api/gps-sort/parse-url` — extract coordinates from a Google Maps URL.
-- **Frontend** (`index.html`):
-  - "Add new region alias" form in the aliases section: name, Google Maps URL/coords, radius (km).
-  - Aliases display `original_name` in italics when present.
-  - Alias radius is editable via inline `<input type="number">` with auto-save on change.
-  - Coordinates are clickable Google Maps links (`_gmapsLink()` helper).
-  - Files and folders in preview table are clickable to open via OS (`_openPath()` helper calling `POST /api/file/open`).
-  - Renamed "Detected Trips" → "Detected Regions", icon `flight` → `place`.
-  - Group labels changed from "Trip"/"Location" to "New"/"Alias".
-  - Region centroids in the detected regions card are clickable Google Maps links.
-- **Tests** (`test_gps_sorter.py`): Added `TestParseGoogleMapsUrl` (8 tests: @-style, query, ll, place, plain coords, negative coords, invalid, empty). Added tests for `add_alias`, `add_alias_with_original_name`, `update_alias`, `update_alias_nonexistent`, `save_alias_with_original_name`, `alias_to_dict_no_original`. Updated `test_alias_to_dict` for `original_name`.
-- **Tests** (`test_main.py`): Added 7 new tests: `test_gps_sort_aliases_create`, `test_gps_sort_aliases_create_from_url`, `test_gps_sort_aliases_create_bad_url`, `test_gps_sort_aliases_create_missing_coords`, `test_gps_sort_aliases_update`, `test_gps_sort_aliases_update_not_found`, `test_gps_sort_parse_url`, `test_gps_sort_parse_url_invalid`. Updated `test_gps_sort_aliases_list` for `original_name`.
-
-## 2026-02-26 18:45 – GPS Sorter: Customisable "No GPS" folder name
-
-- **Backend** (`gps_sorter.py`): Added `no_gps_name` parameter to `GpsSorter.execute()`. When provided and non-empty, overrides the default `No GPS` folder name for files without GPS data. The name is sanitised via `_sanitise_folder()`.
-- **API** (`main.py`): `POST /api/gps-sort/execute` now accepts optional `no_gps_name` field in the request body. Passed through to `GpsSorter.execute()`.
-- **Frontend** (`index.html`): After preview, if there are files without GPS, a `gps_off` icon and editable input field (default "No GPS") appears in the "Detected Trips" card alongside trip name inputs. The user can rename this folder before executing. The value is sent as `no_gps_name` in the execute request. The trips section now also appears when there are only no-GPS files (no trips needed).
-- **Tests** (`test_gps_sorter.py`): Added 5 new tests: `test_no_gps_name_override`, `test_no_gps_name_empty_uses_default`, `test_no_gps_name_none_uses_default`, `test_no_gps_name_with_trips`, `test_no_gps_name_sanitised`.
-
-## 2026-02-26 18:15 – GPS Sorter v3: Replace Named Locations with auto-learned Region Aliases
-
-- **Core concept change**: Removed manual Named Locations CRUD (lat/lon/radius input). Replaced with auto-learned Region Aliases — when a user names a trip during execute, the system remembers the region (centroid + radius) under that alias and auto-matches future photos to it.
-- **Database model** (`gps_sorter.py`): `NamedLocationRow` → `RegionAliasRow` (table `gps_region_aliases`). Fields: id, alias, lat, lon, radius_km (default 5.0).
-- **Alias persistence**: New methods `get_aliases()`, `delete_alias()`, `_save_alias()` (upsert — updates nearby existing alias or creates new), `_alias_to_dict()`, `_match_alias()`. Removed `add_location()`, `get_locations()`, `update_location()`, `delete_location()`, `_loc_to_dict()`.
-- **Distance-based trip splitting**: `TRIP_SPLIT_KM = 50.0` — trips are now split when a photo is >50km from the current cluster centroid (not just consecutive distance). Tracks cluster centroid dynamically during grouping.
-- **Alias saving on execute**: When user provides `trip_names`, computes each trip's centroid + radius and calls `_save_alias()` with `ALIAS_BUFFER_KM = 5.0` buffer. Saved aliases auto-match on future previews.
-- **Trip metadata enriched**: Each trip now includes `centroid_lat`, `centroid_lon`, `radius_km` in preview response.
-- **API endpoints** (`main.py`): Replaced 4 location CRUD endpoints with `GET /api/gps-sort/aliases` and `DELETE /api/gps-sort/aliases`.
-- **Frontend** (`index.html`): Replaced Named Locations form (editable lat/lon/radius inputs, Add Location button) with read-only collapsible "Saved Region Aliases" section. Shows alias name, coordinates, radius, and delete button. Aliases reload after execute to show newly learned regions.
-- **Tests**: 66 tests in `test_gps_sorter.py` (was 61): `TestMatchAlias` (4), `TestAliasPersistence` (8 — empty, save_and_get, ordered, updates_nearby, creates_new_when_far, delete, delete_nonexistent, alias_to_dict), new preview tests (`test_distance_splits_trips`, `test_nearby_photos_stay_in_same_trip`, `test_trip_centroid_in_metadata`), new execute tests (`test_execute_saves_aliases`, `test_saved_alias_auto_matches_next_preview`, `test_execute_no_trip_names_no_alias_saved`). 10 GPS tests in `test_main.py`: 2 alias endpoint tests replace 6 location CRUD tests. All 76 tests passing.
-
-## 2026-02-26 17:30 – GPS Sorter v2: Trip detection, DB persistence, interactive naming
-
-- **Trip detection algorithm** (`file_tools/tools/gps_sorter.py`): Major refactor of GPS Sorter. Files are sorted chronologically (EXIF date via `DateSorter._creation_time`), classified against DB-backed named locations, and consecutive photos NOT at any named location are automatically grouped into "trips". Each trip receives a suggested name via batch offline reverse geocoding (most common city). Users can rename trips in the preview before executing.
-- **Database persistence** (SQLAlchemy): Named locations are now stored in a `gps_named_locations` table (id, name, lat, lon, radius_km) instead of browser localStorage. Uses the same `db_url` constructor pattern as DedupScanner (temp dir SQLite default). CRUD methods: `add_location()`, `get_locations()`, `update_location()`, `delete_location()`.
-- **Updated preview response**: Preview now returns `{plan, trips, total, no_gps_count}`. Each plan entry includes `group` ("location"/"trip"/"no_gps"), `trip_id`, and `location_name`. Each trip has `id`, `suggested_name`, `file_count`, `start_date`, `end_date`.
-- **Execute with trip renaming**: `execute()` accepts optional `trip_names` dict mapping trip_id → user-chosen folder name. Overrides suggested names for matching entries.
-- **New API endpoints**: `GET /api/gps-sort/locations` (list), `POST /api/gps-sort/locations` (add), `PUT /api/gps-sort/locations` (update), `DELETE /api/gps-sort/locations` (delete). Module-level `_gps_db_url` for DB URL configuration. Updated preview/execute endpoints for new response format and trip_names parameter.
-- **Frontend overhaul**: Named locations now loaded from API on tab activation (no more localStorage). Inline editing with auto-save via PUT. Add/Delete via API calls. New "Detected Trips" card in preview shows editable trip name inputs with file count and date range. Execute collects trip names from inputs and sends as `trip_names` dict. Preview table now shows Group column (Location/Trip/No GPS) with color coding.
-- **Tests**: 61 tests in `test_gps_sorter.py` (was 43): added `TestFileTimestamp` (2), `TestLocationCRUD` (9), plus trip detection tests (`test_trip_detection_creates_trips`, `test_multiple_trips_separated_by_home`, `test_trip_date_range`, `test_trip_suggested_name_most_common`, `test_no_gps_count`, `test_no_timestamp_in_plan_entries`, `test_trip_names_override`, `test_trip_names_partial_override`). Updated all preview/execute tests for new `dict` return format. 14 GPS tests in `test_main.py` (was 7): added location CRUD endpoint tests (6), `test_gps_sort_execute_with_trip_names`. All tests passing.
-
-## 2026-02-26 16:00 – GPS Sorter feature
-
-- **New tool: GPS Sorter** (`file_tools/tools/gps_sorter.py`): Sorts photos into location-based subdirectories using GPS coordinates from EXIF metadata. Workflow mirrors Date Sorter: preview → confirm → move files. Features:
-  - **GPS extraction**: Reads GPSLatitude/GPSLongitude from EXIF IFD via Pillow.
-  - **Named locations**: Users define places (name, lat, lon, radius_km). Photos within radius are sorted into that folder.
-  - **Reverse geocoding**: Unmatched GPS photos are batch-geocoded to `CC/City` folders using offline `reverse_geocoder` library.
-  - **No GPS fallback**: Files without GPS EXIF go into `No GPS/` folder.
-  - **Haversine distance**: Great-circle distance calculation for location matching.
-- **API endpoints**: Added `POST /api/gps-sort/preview` and `POST /api/gps-sort/execute` in `main.py`.
-- **Frontend**: New "GPS Sorter" tab in `index.html` with directory browser, named locations manager (add/remove/edit with localStorage persistence), preview table showing file→location→folder mappings, and execute button.
-- **Dependencies**: Added `reverse_geocoder>=1.5.0` to `pyproject.toml`.
-- **Tests**: Created `file_tools/tests/test_gps_sorter.py` with comprehensive tests for all methods: `_dms_to_decimal`, `_haversine_km`, `_gps_coordinates`, `_match_named_location`, `_reverse_geocode`, `_sanitise_folder`, `preview`, `execute`. Added GPS sort endpoint tests to `test_main.py`.
 
 ## 2026-02-26 15:30 – README with screenshots, v1.2.0 release
 
