@@ -176,7 +176,39 @@ def run_desktop(
     if callable(on_ready):
         on_ready()
 
-    webview.start(gui="edgechromium", private_mode=False)
+    # Start the GUI and surface any errors to the user (no console when
+    # launched from the installer). If webview fails to create or start
+    # (missing WebView2 runtime, pythonnet issues, etc.), write a traceback
+    # to `filetools-error.log` in the current working directory and show a
+    # MessageBox so the user is aware of the failure.
+    def _log_and_alert(msg: str, exc: Exception | None = None) -> None:
+        try:
+            import ctypes
+            import traceback as _tb
+            # write traceback
+            log = Path.cwd() / "filetools-error.log"
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+                if exc is not None:
+                    f.write(_tb.format_exc())
+                    f.write("\n")
+        except Exception:
+            pass
+        try:
+            ctypes.windll.user32.MessageBoxW(0, msg, "FileTools - Error", 0x10)
+        except Exception:
+            pass
+
+    try:
+        webview.start(gui="edgechromium", private_mode=False)
+    except Exception as exc:  # pragma: no cover - runtime error path
+        # Attempt graceful uvicorn shutdown
+        if _uvicorn_server is not None:
+            _uvicorn_server.should_exit = True
+        _log_and_alert("FileTools failed to start the GUI. See filetools-error.log for details.", exc)
+        # Ensure process exit to avoid leaving background threads running
+        import os  # noqa: PLC0415
+        os._exit(1)
 
     # Ensure the uvicorn server shuts down when the window closes.
     if _uvicorn_server is not None:

@@ -123,7 +123,7 @@ class TestSteps:
         assert bat.exists()
         content = bat.read_text(encoding="utf-8")
         assert ".venv\\pythonw.exe" in content
-        assert "file_tools.py" in content
+        assert "launcher.pyw" in content
         # Must NOT reference Scripts (old broken path)
         assert "Scripts" not in content
 
@@ -140,7 +140,7 @@ class TestSteps:
         assert "Uninstall" in content
         # Shortcuts must point to pythonw.exe directly (no console)
         assert ".venv\\pythonw.exe" in content
-        assert "file_tools.py" in content
+        assert "launcher.pyw" in content
 
     def test_write_nsis_script_no_icon(self, builder: InstallerBuilder) -> None:
         builder._clean()
@@ -207,14 +207,55 @@ class TestSteps:
             assert "venv" in args
             assert "--copies" in args
 
+    def test_create_venv_copies_fallback(
+        self, builder: InstallerBuilder,
+    ) -> None:
+        """When --copies fails, _create_venv retries without it."""
+        builder._clean()
+        builder._create_staging()
+        call_count = 0
+
+        def _side_effect(cmd: list, **kw: object) -> None:  # noqa: ANN401
+            nonlocal call_count
+            call_count += 1
+            if "--copies" in cmd:
+                raise subprocess.CalledProcessError(1, cmd)
+
+        with patch("subprocess.check_call", side_effect=_side_effect):
+            builder._create_venv()
+        assert call_count == 2  # first with --copies, then without
+
     def test_install_deps(self, builder: InstallerBuilder) -> None:
         builder._clean()
         builder._create_staging()
-        with patch("subprocess.check_call") as mock_call:
+
+        # Set up dev venv with site-packages and a python exe
+        dev_venv = builder.project_root / ".venv"
+        dev_sp = dev_venv / "Lib" / "site-packages"
+        dev_sp.mkdir(parents=True, exist_ok=True)
+        dev_python = dev_venv / "Scripts" / "python.exe"
+        dev_python.parent.mkdir(parents=True, exist_ok=True)
+        dev_python.write_bytes(b"EXE")
+
+        # Staging venv + pip + site-packages must exist
+        staging_venv = builder._staging / "app" / ".venv"
+        staging_sp = staging_venv / "Lib" / "site-packages"
+        staging_sp.mkdir(parents=True, exist_ok=True)
+        pip_exe = staging_venv / "Scripts" / "pip.exe"
+        pip_exe.parent.mkdir(parents=True, exist_ok=True)
+        pip_exe.write_bytes(b"EXE")
+
+        freeze_output = "click==8.1.7\nanyio==4.4.0\n"
+        with (
+            patch("subprocess.check_output", return_value=freeze_output),
+            patch("subprocess.check_call") as mock_call,
+        ):
             builder._install_deps()
-            mock_call.assert_called_once()
-            args = mock_call.call_args[0][0]
-            assert "pip.exe" in args[0] or "pip" in str(args[0])
+            # Steps 3 + 4: pip install reqs, pip install project
+            assert mock_call.call_count == 2
+            for call_args in mock_call.call_args_list:
+                args = call_args[0][0]
+                assert "pip.exe" in args[0] or "pip" in str(args[0])
 
     def test_make_venv_portable(self, builder: InstallerBuilder, tmp_path: Path) -> None:
         builder._clean()
@@ -274,6 +315,18 @@ class TestSteps:
         with patch("subprocess.check_output", return_value="C:\\Python313\n"):
             result = builder._base_python_dir()
             assert result == Path("C:\\Python313")
+
+    def test_base_python_dir_uses_dev_venv(
+        self, builder: InstallerBuilder,
+    ) -> None:
+        """_base_python_dir prefers the dev-venv python when present."""
+        dev_py = builder.project_root / ".venv" / "Scripts" / "python.exe"
+        dev_py.parent.mkdir(parents=True, exist_ok=True)
+        dev_py.write_bytes(b"EXE")
+        with patch("subprocess.check_output", return_value="C:\\Py313\n") as mock:
+            builder._base_python_dir()
+            called_exe = mock.call_args[0][0][0]
+            assert called_exe == str(dev_py)
 
 
 # ---------------------------------------------------------------------------

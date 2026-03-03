@@ -29,9 +29,13 @@ def run(mode: str = "desktop") -> None:
         splash = Splash()
         splash.show()
 
-        from file_tools.desktop import run_desktop
+        try:
+            from file_tools.desktop import run_desktop
 
-        run_desktop(on_ready=splash.close)
+            run_desktop(on_ready=splash.close)
+        except Exception:
+            splash.close()
+            raise
     else:
         print(f"Unknown mode '{mode}'. Use 'desktop' or 'web'.", file=sys.stderr)
         sys.exit(1)

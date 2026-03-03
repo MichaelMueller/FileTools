@@ -82,7 +82,17 @@ class InstallerBuilder:
     def _clean(self) -> None:
         """Remove previous build artefacts."""
         if self._staging.exists():
-            shutil.rmtree(self._staging)
+            # On Windows, rmtree can fail on read-only or locked files.
+            def _on_rm_error(
+                func: object, path: str, _exc_info: object,
+            ) -> None:
+                os.chmod(path, 0o700)
+                if os.path.isdir(path):
+                    os.rmdir(path)
+                else:
+                    os.remove(path)
+
+            shutil.rmtree(self._staging, onerror=_on_rm_error)
         self._output.mkdir(parents=True, exist_ok=True)
         self._staging.mkdir(parents=True, exist_ok=True)
 
@@ -91,18 +101,38 @@ class InstallerBuilder:
         (self._staging / "app").mkdir(parents=True, exist_ok=True)
 
     def _create_venv(self) -> None:
-        """Create a portable Python virtual environment inside staging."""
+        """Create a portable Python virtual environment inside staging.
+
+        Uses the project's dev-venv Python so the staging venv always
+        matches the Python version that has compatible wheels installed.
+        Falls back to symlinks if ``--copies`` fails (common on Windows).
+        """
         venv_dir = self._staging / "app" / ".venv"
-        subprocess.check_call(
-            [self.python_exe, "-m", "venv", str(venv_dir), "--copies"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        dev_python = self.project_root / ".venv" / "Scripts" / "python.exe"
+        python = str(dev_python) if dev_python.is_file() else self.python_exe
+        try:
+            subprocess.check_call(
+                [python, "-m", "venv", str(venv_dir), "--copies"],
+                stdout=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            # --copies can fail on Windows; fall back to default (symlinks)
+            if venv_dir.exists():
+                shutil.rmtree(venv_dir)
+            subprocess.check_call(
+                [python, "-m", "venv", str(venv_dir)],
+                stdout=subprocess.DEVNULL,
+            )
 
     # Packages to pre-seed from the build venv because they lack
     # compatible wheels on newer Python versions.
+    # ``clr.py`` is the shim that calls ``pythonnet.load()`` — without it
+    # ``import clr`` fails and pywebview cannot start.
+    # ``_cffi_backend*`` is the compiled C extension (.pyd) that lives at
+    # the top level of site-packages, outside the ``cffi/`` directory.
     _PRESEED_GLOBS = (
-        "pythonnet*", "clr_loader*", "cffi*", "pycparser*",
+        "pythonnet*", "clr_loader*", "clr.py",
+        "cffi*", "_cffi_backend*", "pycparser*",
     )
 
     def _install_deps(self) -> None:
@@ -166,16 +196,12 @@ class InstallerBuilder:
         subprocess.check_call(
             [str(pip), "install", "--no-deps", "--no-warn-script-location",
              "-q", "-r", str(req_file)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
 
         # ── 4. Install the project itself (no deps — already done) ───
         subprocess.check_call(
             [str(pip), "install", "--no-deps", "--no-warn-script-location",
              "-q", str(self.project_root)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
 
     # Stdlib directories that are not needed at runtime
@@ -243,10 +269,15 @@ class InstallerBuilder:
             cfg.unlink()
 
     def _base_python_dir(self) -> Path:
-        """Return the base Python installation directory."""
-        # When running inside a venv, sys.base_prefix points at the real installation.
+        """Return the base Python installation directory.
+
+        Uses the dev-venv Python so the portable runtime always matches
+        the version used to create the staging venv.
+        """
+        dev_python = self.project_root / ".venv" / "Scripts" / "python.exe"
+        python = str(dev_python) if dev_python.is_file() else self.python_exe
         result = subprocess.check_output(
-            [self.python_exe, "-c", "import sys; print(sys.base_prefix)"],
+            [python, "-c", "import sys; print(sys.base_prefix)"],
             text=True,
         ).strip()
         return Path(result)
@@ -283,10 +314,62 @@ class InstallerBuilder:
     def _write_launcher(self) -> None:
         """Write a batch launcher that starts the app from the portable venv."""
         bat = self._staging / "app" / self.APP_EXE_NAME
+        # Write a simple batch for backward compatibility (launch from File Explorer)
         bat.write_text(
             '@echo off\r\n'
             'cd /d "%~dp0"\r\n'
-            '".venv\\pythonw.exe" file_tools.py %*\r\n',
+            '".venv\\pythonw.exe" launcher.pyw %*\r\n',
+            encoding="utf-8",
+        )
+
+        # Write a Python launcher that executes the main entry-point and
+        # displays a MessageBox + writes a log file if an unhandled exception
+        # occurs.  Uses absolute paths so it works regardless of CWD.
+        launcher = self._staging / "app" / "launcher.pyw"
+        launcher.write_text(
+            '"""FileTools launcher \u2014 error-safe wrapper around file_tools.py."""\n'
+            '\n'
+            'import os, sys, traceback, runpy, datetime\n'
+            '\n'
+            '_APP_DIR = os.path.dirname(os.path.abspath(__file__))\n'
+            '\n'
+            'def _show_error(msg):\n'
+            '    try:\n'
+            '        import ctypes\n'
+            '        ctypes.windll.user32.MessageBoxW(0, msg, "FileTools - Error", 0x10)\n'
+            '    except Exception:\n'
+            '        pass\n'
+            '\n'
+            'def _log_error(tb):\n'
+            '    try:\n'
+            '        log = os.path.join(_APP_DIR, "filetools-error.log")\n'
+            '        with open(log, "a", encoding="utf-8") as f:\n'
+            '            f.write("\\n--- " + datetime.datetime.now().isoformat() + " ---\\n")\n'
+            '            f.write(tb + "\\n")\n'
+            '    except Exception:\n'
+            '        pass\n'
+            '\n'
+            'def main():\n'
+            '    os.chdir(_APP_DIR)\n'
+            '    if _APP_DIR not in sys.path:\n'
+            '        sys.path.insert(0, _APP_DIR)\n'
+            '    try:\n'
+            '        runpy.run_path(\n'
+            '            os.path.join(_APP_DIR, "file_tools.py"),\n'
+            '            run_name="__main__",\n'
+            '        )\n'
+            '    except Exception:\n'
+            '        tb = traceback.format_exc()\n'
+            '        _log_error(tb)\n'
+            '        _show_error(\n'
+            '            "FileTools failed to start.\\n\\n"\n'
+            '            "Details written to:\\n"\n'
+            '            + os.path.join(_APP_DIR, "filetools-error.log")\n'
+            '        )\n'
+            '        sys.exit(1)\n'
+            '\n'
+            'if __name__ == "__main__":\n'
+            '    main()\n',
             encoding="utf-8",
         )
 
@@ -350,7 +433,7 @@ class InstallerBuilder:
                 CreateDirectory "$SMPROGRAMS\\{self.APP_NAME}"
                 SetOutPath "$INSTDIR"
                 CreateShortCut "$SMPROGRAMS\\{self.APP_NAME}\\{self.APP_NAME}.lnk" \\
-                    "$INSTDIR\\.venv\\pythonw.exe" "file_tools.py" \\
+                    "$INSTDIR\\.venv\\pythonw.exe" "launcher.pyw" \\
                     {"$INSTDIR\\icon.ico" if has_icon else ""}
                 CreateShortCut "$SMPROGRAMS\\{self.APP_NAME}\\Uninstall.lnk" \\
                     "$INSTDIR\\Uninstall.exe"
@@ -358,7 +441,7 @@ class InstallerBuilder:
                 ; Desktop shortcut — launch pythonw.exe directly (no console)
                 SetOutPath "$INSTDIR"
                 CreateShortCut "$DESKTOP\\{self.APP_NAME}.lnk" \\
-                    "$INSTDIR\\.venv\\pythonw.exe" "file_tools.py" \\
+                    "$INSTDIR\\.venv\\pythonw.exe" "launcher.pyw" \\
                     {"$INSTDIR\\icon.ico" if has_icon else ""}
             SectionEnd
 
@@ -366,6 +449,9 @@ class InstallerBuilder:
             Section "Uninstall"
                 ; Remove files
                 RMDir /r "$INSTDIR"
+
+                ; Remove application data (databases, configs)
+                RMDir /r "$LOCALAPPDATA\\{self.APP_NAME}"
 
                 ; Remove shortcuts
                 Delete "$SMPROGRAMS\\{self.APP_NAME}\\{self.APP_NAME}.lnk"

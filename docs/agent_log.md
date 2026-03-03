@@ -1,5 +1,103 @@
 # Agent Log
 
+## 2026-03-03 12:00 – Clean rebuild of installer
+
+### Summary
+Cleaned the entire `build/` folder and ran a full rebuild. The Python build pipeline (venv creation, dependency installation, portable venv, source copy, precompile, launcher, NSIS script) completed successfully. NSIS compiled the final installer with LZMA compression.
+
+### Changes
+- **`build/FileTools-1.3.1-Setup.exe`** – 71.81 MB, freshly built with all fixes from the previous session (dev-venv Python, visible pip errors, `--copies` fallback).
+
+---
+
+## 2026-03-03 10:30 – Fix missing deps in deployed venv & update tests
+
+### Summary
+The deployed app failed with `ModuleNotFoundError: No module named 'click'` (and ~20 other missing packages). Root cause: `_install_deps()` suppressed stderr (`stderr=subprocess.DEVNULL`), hiding pip install failures. Secondary cause: `_create_venv()` used `sys.executable` which could be Python 3.14 if the dev venv wasn't activated.
+
+**Fix:**
+1. Installed all missing packages directly into the deployed venv.
+2. Fixed `_create_venv()` to use the dev-venv Python (`project_root/.venv/Scripts/python.exe`) with a `--copies` → symlinks fallback.
+3. Removed `stderr=subprocess.DEVNULL` from `_install_deps()` so pip errors are visible.
+4. Fixed `_base_python_dir()` to use dev-venv Python instead of `sys.executable`.
+5. Updated tests: new `test_create_venv_copies_fallback`, `test_base_python_dir_uses_dev_venv`, reworked `test_install_deps` to set up dev venv structure and assert two `check_call` invocations, fixed `test_write_launcher` and `test_write_nsis_script` for `launcher.pyw`.
+
+### Changes
+- **`file_tools/tools/installer_builder.py`** – `_create_venv`, `_install_deps`, `_base_python_dir` hardened.
+- **`file_tools/tests/test_installer_builder.py`** – 23 tests, all passing.
+
+---
+
+## 2026-03-03 09:45 – Rebuild installer
+
+### Summary
+Rebuilt the NSIS installer from scratch with the Python 3.13 dev venv. Verified `import clr` and `import webview` work correctly in the deployed app.
+
+### Changes
+- **Rebuilt installer**: `FileTools-1.3.1-Setup.exe` (54 MB).
+
+---
+
+## 2026-03-02 20:16 – Fix Python 3.14 / cffi ABI mismatch & rebuild
+
+### Summary
+The installed app at `%LOCALAPPDATA%\FileTools` failed with `ModuleNotFoundError: No module named '_cffi_backend'`. Root cause: the dev venv and deployed venv were using **Python 3.14**, but `_cffi_backend.cp313-win_amd64.pyd` was compiled for **Python 3.13**. Python 3.14 cannot load a `.pyd` with a `cp313` ABI tag. Additionally, `pythonnet` and `cffi` do not yet publish wheels for Python 3.14.
+
+**Fix:** Recreated the dev venv with **Python 3.13** (`py -3.13 -m venv .venv`), reinstalled all project dependencies, and rebuilt the NSIS installer. The deployed app now has Python 3.13.2 with a matching `_cffi_backend.cp313-win_amd64.pyd`. Verified `import clr` (pythonnet) and `import webview` (pywebview) both succeed, and the app launches without errors.
+
+### Changes
+- **Dev venv**: Recreated `.venv` using Python 3.13.2 instead of 3.14.2.
+- **Rebuilt installer**: `FileTools-1.3.1-Setup.exe` (75 MB) now bundles Python 3.13 with ABI-compatible native extensions.
+
+---
+
+## 2026-03-02 15:51 – Fix _cffi_backend missing in installed venv & rebuild
+
+### Summary
+The installed app failed with `ModuleNotFoundError: No module named '_cffi_backend'`. The compiled C extension `_cffi_backend.cp313-win_amd64.pyd` lives at the **top level** of site-packages (not inside the `cffi/` directory), so the existing glob `"cffi*"` did not match it. Added `"_cffi_backend*"` to `_PRESEED_GLOBS`. Rebuilt installer (`FileTools-1.3.1-Setup.exe`, 96.5 MB).
+
+### Changes
+- **`file_tools/tools/installer_builder.py`** (`_PRESEED_GLOBS`): Added `"_cffi_backend*"` glob pattern to pre-seed the compiled cffi backend extension into the portable venv.
+
+---
+
+## 2026-03-02 14:34 – Fix pythonnet missing in installed venv & rebuild
+
+### Summary
+Root-caused the installer startup failure: `clr.py` (the pythonnet 3.x shim that calls `pythonnet.load()` to register the `clr` import hook) was not being pre-seeded into the portable venv. The file is named `clr.py`, not `clr_loader*` or `pythonnet*`, so the existing glob patterns missed it. Without `clr.py`, `import clr` fails → pywebview raises *"You must have pythonnet installed"* → the app crashes silently under `pythonw.exe`. Fixed the pre-seed globs and rebuilt the installer (`FileTools-1.3.1-Setup.exe`, 96.5 MB).
+
+### Changes
+- **`file_tools/tools/installer_builder.py`** (`_PRESEED_GLOBS`): Added `"clr.py"` to the glob list so the pythonnet legacy loader shim is copied into the portable venv's `site-packages`. This is the file that bridges `import clr` → `pythonnet.load()`.
+
+---
+
+## 2026-03-02 13:41 – Fix silent installer startup failure & rebuild
+
+### Summary
+Diagnosed and fixed the bug where the installed app showed the splash screen but never launched the main window. Root cause: `pythonw.exe` (no console) silently swallowed all exceptions, so any startup error was invisible. Added a robust error-surfacing launcher, fixed splash cleanup on failure, and hardened the build. Rebuilt installer (`FileTools-1.3.1-Setup.exe`, 96.4 MB).
+
+### Changes
+- **`file_tools.py`** (`run()`): Wrapped the desktop import + `run_desktop()` call in `try/except` so that `splash.close()` is always called before the exception propagates. Previously a failed import left the splash visible.
+- **`file_tools/tools/installer_builder.py`** (`_write_launcher()`): Replaced the fragile `launcher.pyw` with a robust version that:
+  - Uses `os.path.abspath(__file__)` to compute absolute app directory
+  - Calls `os.chdir(_APP_DIR)` and inserts `_APP_DIR` into `sys.path`
+  - Catches all exceptions, writes timestamped tracebacks to `filetools-error.log`, and shows a Windows MessageBox with the log path
+- **`file_tools/tools/installer_builder.py`** (`_clean()`): Added `onerror` handler to `shutil.rmtree` that `os.chmod`s read-only/locked files before retrying, preventing `WinError 145` on rebuild.
+- **`file_tools/desktop.py`** (`run_desktop()`): Wrapped `webview.start()` in `try/except` that logs the traceback and shows a MessageBox on GUI init failure (e.g. missing WebView2 runtime, pythonnet issues).
+- **NSIS shortcuts**: Updated Start Menu and Desktop shortcut targets from `file_tools.py` to `launcher.pyw` so error handling is always active.
+
+---
+
+## 2026-02-27 22:01 – Release v1.3.1
+
+### Summary
+Bumped version to 1.3.1, tagged `v1.3.1`, committed, pushed, and built installer (`FileTools-1.3.1-Setup.exe`, 96.4 MB).
+
+### Changes
+- **`pyproject.toml`**, **`file_tools/__init__.py`**, **`file_tools/main.py`**, **`file_tools/tools/installer_builder.py`**: version 1.3.0 → 1.3.1
+
+---
+
 ## 2026-02-27 21:15 – Hide GPS Sorter from main menu
 
 ### Summary
