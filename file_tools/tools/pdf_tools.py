@@ -34,7 +34,7 @@ def image_to_pdf(
     margin_mm:
         Margin around the image in millimetres.
     """
-    img = Image.open(image_path)
+    img = Image.open(io.BytesIO(image_path.read_bytes()))
     # Apply EXIF orientation so landscape photos stay landscape
     img = ImageOps.exif_transpose(img)
     if img.mode in ("RGBA", "P"):
@@ -92,7 +92,7 @@ def merge_pdfs(
             )
             reader = PdfReader(io.BytesIO(pdf_bytes))
         else:
-            reader = PdfReader(str(path))
+            reader = PdfReader(io.BytesIO(path.read_bytes()))
         for page in reader.pages:
             writer.add_page(page)
     output = io.BytesIO()
@@ -110,7 +110,7 @@ def split_pdf(input_source: Path | io.BytesIO, page_ranges: list[tuple[int, int]
     if isinstance(input_source, io.BytesIO):
         reader = PdfReader(input_source)
     else:
-        reader = PdfReader(str(input_source))
+        reader = PdfReader(io.BytesIO(input_source.read_bytes()))
     total = len(reader.pages)
     results: list[bytes] = []
     for start, end in page_ranges:
@@ -138,11 +138,11 @@ def split_pdf_to_images(
     """
     try:
         import pypdfium2 as pdfium  # noqa: PLC0415
-    except ImportError as exc:
+    except ImportError as exc:  # pragma: no cover
         msg = "pypdfium2 is required for JPEG output. Install it with:  pip install pypdfium2"
         raise ImportError(msg) from exc
 
-    pdf = pdfium.PdfDocument(str(input_path))
+    pdf = pdfium.PdfDocument(input_path.read_bytes())
     total = len(pdf)
     results: list[bytes] = []
     for start, end in page_ranges:

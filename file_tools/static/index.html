@@ -663,11 +663,8 @@
         <div class="file-manager__header">
           <span id="merge-file-count">0 files</span>
           <div class="file-manager__actions">
-            <button class="btn btn-outline btn-sm" onclick="document.getElementById('merge-files').click()">
+            <button class="btn btn-outline btn-sm" onclick="mergeAddFiles()">
               <span class="material-icons" style="font-size:14px">add</span>Add Files
-            </button>
-            <button class="btn btn-outline btn-sm" onclick="openFileDialog('merge')">
-              <span class="material-icons" style="font-size:14px">folder_open</span>Browse
             </button>
             <button class="btn btn-outline btn-sm" onclick="mergeClearAll()">
               <span class="material-icons" style="font-size:14px">delete_sweep</span>Clear
@@ -981,7 +978,45 @@
       <div style="margin-top:var(--sp-sm);">
         <div style="display:flex;align-items:center;gap:var(--sp-xs);margin-bottom:var(--sp-xs);">
           <span class="material-icons" style="font-size:16px;color:var(--clr-muted);">label</span>
-          <span style="font-size:.85rem;color:var(--clr-muted);font-weight:500;">DICOM Tags</span>
+          <span style="font-size:.85rem;color:var(--clr-muted);font-weight:500;">Required DICOM Tags</span>
+        </div>
+
+        <!-- Mandatory tag inputs -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-xs) var(--sp-sm);">
+          <div class="form-group">
+            <label for="dcm-modality" style="font-size:.75rem;color:var(--clr-muted);">Modality (0008,0060)</label>
+            <select id="dcm-modality" style="width:100%;">
+              <option value="DOC" selected>DOC</option>
+              <option value="OT">OT</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="dcm-series-number" style="font-size:.75rem;color:var(--clr-muted);">Series Number (0020,0011)</label>
+            <input type="text" id="dcm-series-number" value="500" style="width:100%;" />
+          </div>
+          <div class="form-group">
+            <label for="dcm-series-desc" style="font-size:.75rem;color:var(--clr-muted);">Series Description (0008,103E)</label>
+            <input type="text" id="dcm-series-desc" value="Report PDF" style="width:100%;" />
+          </div>
+          <div class="form-group">
+            <label for="dcm-doc-title" style="font-size:.75rem;color:var(--clr-muted);">Document Title (0042,0010)</label>
+            <input type="text" id="dcm-doc-title" value="Radiology Report" style="width:100%;" />
+          </div>
+          <div class="form-group">
+            <label for="dcm-image-type" style="font-size:.75rem;color:var(--clr-muted);">Image Type (0008,0008)</label>
+            <input type="text" id="dcm-image-type" value="DERIVED\\SECONDARY" style="width:100%;" />
+          </div>
+          <div class="form-group">
+            <label for="dcm-manufacturer" style="font-size:.75rem;color:var(--clr-muted);">Manufacturer (0008,0070) <span style="opacity:.6">optional</span></label>
+            <input type="text" id="dcm-manufacturer" value="" placeholder="e.g. ACME Medical" style="width:100%;" />
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--clr-outline);margin:var(--sp-sm) 0;" />
+
+        <div style="display:flex;align-items:center;gap:var(--sp-xs);margin-bottom:var(--sp-xs);">
+          <span class="material-icons" style="font-size:16px;color:var(--clr-muted);">label</span>
+          <span style="font-size:.85rem;color:var(--clr-muted);font-weight:500;">Additional DICOM Tags</span>
         </div>
 
         <div id="dcm-tags-list"></div>
@@ -1379,7 +1414,7 @@ async function mergePdfs() {
   const openAfter = document.getElementById('merge-open-after').checked;
   const isDesktop = await _detectDesktop();
 
-  if (_mergeDesktopFiles.length >= 2) {
+  if (_mergeDesktopFiles.length >= 1) {
     fd.append('file_paths', _mergeDesktopFiles.join('\n'));
     try {
       showProgress('Merging PDFs…', `${_mergeDesktopFiles.length} files`);
@@ -1403,8 +1438,8 @@ async function mergePdfs() {
     return;
   }
 
-  if (_mergeFiles.length < 2) {
-    showResult('merge-result', 'Please add at least 2 files.', 'error'); return;
+  if (_mergeFiles.length < 1) {
+    showResult('merge-result', 'Please add at least one file.', 'error'); return;
   }
   for (const f of _mergeFiles) fd.append('files', f.file);
 
@@ -1725,15 +1760,40 @@ async function browseSplitFile() {
 }
 
 async function openDirDialog(which) {
-  try {
-    const res = await fetch('/api/dialog/directory');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data.directory) return;
-    const id = which === 'source' ? 'dir-source' : 'dir-target';
-    document.getElementById(id).value = data.directory;
-    localStorage.setItem('dir-compare-' + which, data.directory);
-  } catch (_) { /* ignore */ }
+  const id = which === 'source' ? 'dir-source' : 'dir-target';
+  const isDesktop = await _detectDesktop();
+  if (isDesktop) {
+    try {
+      const cur = document.getElementById(id).value.trim();
+      const qp = cur ? '?default_dir=' + encodeURIComponent(cur) : '';
+      const res = await fetch('/api/dialog/directory' + qp);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.directory) return;
+      document.getElementById(id).value = data.directory;
+      localStorage.setItem('dir-compare-' + which, data.directory);
+    } catch (_) { /* ignore */ }
+  } else {
+    const inputId = 'dir-compare-' + which + '-input';
+    let dirInput = document.getElementById(inputId);
+    if (!dirInput) {
+      dirInput = document.createElement('input');
+      dirInput.type = 'file';
+      dirInput.id = inputId;
+      dirInput.setAttribute('webkitdirectory', '');
+      dirInput.style.display = 'none';
+      dirInput.addEventListener('change', function () {
+        if (this.files.length) {
+          const rel = this.files[0].webkitRelativePath || '';
+          const dirName = rel.split('/')[0] || this.files[0].name;
+          document.getElementById(id).value = dirName;
+          localStorage.setItem('dir-compare-' + which, dirName);
+        }
+      });
+      document.body.appendChild(dirInput);
+    }
+    dirInput.click();
+  }
 }
 
 /* ── Restore remembered directory compare inputs ──────────────────── */
@@ -2194,6 +2254,15 @@ async function dcmBrowsePdf() {
   }
 }
 
+/* ── Unified Add Files: native dialog in desktop, file-input in browser ── */
+async function mergeAddFiles() {
+  if (await _detectDesktop()) {
+    openFileDialog('merge');
+  } else {
+    document.getElementById('merge-files').click();
+  }
+}
+
 /* ── Handle browser file input for PDF ─────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
   const pdfInput = document.getElementById('dcm-pdf-file');
@@ -2348,7 +2417,20 @@ async function dcmLoadConfig() {
   if (!name) { showResult('dcm-result', 'Enter or select a configuration name.', 'error'); return; }
   const cfg = _dcmConfigs.find(c => c.name === name);
   if (!cfg) { showResult('dcm-result', 'Configuration not found: ' + name, 'error'); return; }
-  _dcmTags = {...cfg.tags};
+  const t = cfg.tags || {};
+  /* Restore mandatory fields */
+  if (t.Modality) document.getElementById('dcm-modality').value = t.Modality;
+  if (t.SeriesNumber) document.getElementById('dcm-series-number').value = t.SeriesNumber;
+  if (t.SeriesDescription) document.getElementById('dcm-series-desc').value = t.SeriesDescription;
+  if (t.DocumentTitle) document.getElementById('dcm-doc-title').value = t.DocumentTitle;
+  if (t.ImageType) document.getElementById('dcm-image-type').value = t.ImageType;
+  document.getElementById('dcm-manufacturer').value = t.Manufacturer || '';
+  /* Remaining tags go into the additional tags list */
+  const fixedKeys = new Set(['Modality','SeriesNumber','SeriesDescription','DocumentTitle','ImageType','Manufacturer']);
+  _dcmTags = {};
+  for (const [k, v] of Object.entries(t)) {
+    if (!fixedKeys.has(k)) _dcmTags[k] = v;
+  }
   dcmRenderTags();
   showResult('dcm-result', 'Loaded configuration: ' + name, 'success');
 }
@@ -2363,7 +2445,7 @@ async function dcmSaveConfig() {
     const r = await fetch('/api/pdf2dcm/configs', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ name, tags: _dcmTags }),
+      body: JSON.stringify({ name, tags: _dcmCollectAllTags() }),
     });
     if (!r.ok) { showResult('dcm-result', await errorDetail(r), 'error'); return; }
     await dcmRefreshConfigs();
@@ -2391,6 +2473,21 @@ async function dcmDeleteConfig() {
 }
 
 /* ── Generate DCM ──────────────────────────────────────────────────── */
+function _dcmCollectAllTags() {
+  const tags = {};
+  /* Mandatory fixed fields */
+  tags['Modality']          = document.getElementById('dcm-modality').value;
+  tags['SeriesNumber']      = document.getElementById('dcm-series-number').value;
+  tags['SeriesDescription'] = document.getElementById('dcm-series-desc').value;
+  tags['DocumentTitle']     = document.getElementById('dcm-doc-title').value;
+  tags['ImageType']         = document.getElementById('dcm-image-type').value;
+  const mfr = document.getElementById('dcm-manufacturer').value.trim();
+  if (mfr) tags['Manufacturer'] = mfr;
+  /* Merge additional user tags (they can override fixed fields) */
+  Object.assign(tags, _dcmTags);
+  return tags;
+}
+
 async function dcmGenerate() {
   if (!_dcmPdfFile) {
     showResult('dcm-result', 'Please select a PDF file first.', 'error');
@@ -2427,7 +2524,7 @@ async function dcmGenerate() {
         pdf_path: _dcmPdfFile,
         output_path: path,
         template_path: typeof _dcmTemplateFile === 'string' ? _dcmTemplateFile : null,
-        tags: _dcmTags,
+        tags: _dcmCollectAllTags(),
       };
       const r = await fetch('/api/pdf2dcm/convert-desktop', {
         method: 'POST',
@@ -2448,7 +2545,7 @@ async function dcmGenerate() {
       if (_dcmTemplateFile instanceof File) {
         fd.append('template', _dcmTemplateFile);
       }
-      fd.append('tags_json', JSON.stringify(_dcmTags));
+      fd.append('tags_json', JSON.stringify(_dcmCollectAllTags()));
 
       const r = await fetch('/api/pdf2dcm/convert', { method: 'POST', body: fd });
       if (!r.ok) { showResult('dcm-result', await errorDetail(r), 'error'); return; }

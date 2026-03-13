@@ -163,6 +163,27 @@ class TestExifTimestamp:
         assert lt.tm_year == 2025
         assert lt.tm_mon == 9
 
+    def test_returns_none_for_image_with_empty_exif(self, tmp_path: Path) -> None:
+        """JPEG with no EXIF tags should hit the ``if not exif`` branch."""
+        from PIL import Image  # noqa: PLC0415
+
+        img = Image.new("RGB", (1, 1))
+        jpg = tmp_path / "empty_exif.jpg"
+        img.save(jpg)
+        assert DateSorter._exif_timestamp(jpg) is None
+
+    def test_returns_none_for_exif_without_date_tags(self, tmp_path: Path) -> None:
+        """Image with EXIF but no date tags should return None after the loop."""
+        from PIL import Image  # noqa: PLC0415
+        from PIL.ExifTags import Base as ExifBase  # noqa: PLC0415
+
+        img = Image.new("RGB", (1, 1))
+        exif = img.getexif()
+        exif[ExifBase.Make] = "TestCamera"
+        jpg = tmp_path / "nodate_exif.jpg"
+        img.save(jpg, exif=exif.tobytes())
+        assert DateSorter._exif_timestamp(jpg) is None
+
     def test_corrupted_exif_returns_none(self, tmp_path: Path) -> None:
         """Corrupted EXIF should not crash, just return None."""
         jpg = tmp_path / "corrupt.jpg"
@@ -256,6 +277,19 @@ class TestPreview:
         assert len(plan) == 5
         # Final callback with total count
         assert calls[-1] == 5
+
+    def test_progress_callback_every_50(self, sorter: DateSorter, tmp_path: Path) -> None:
+        """Progress callback fires at every 50-file boundary during scan."""
+        root = tmp_path / "many"
+        root.mkdir()
+        for i in range(55):
+            (root / f"f{i:03d}.txt").write_text(f"data{i}")
+
+        calls: list[int] = []
+        sorter.preview(root, progress_callback=lambda n: calls.append(n))
+        # Should see both 50 (mid-loop) and 55 (final)
+        assert 50 in calls
+        assert calls[-1] == 55
 
     def test_destination_under_root(self, sorter: DateSorter, photo_dir: Path) -> None:
         """Destinations should be within the source root directory."""

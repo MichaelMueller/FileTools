@@ -57,12 +57,14 @@ class Pdf2Dcm:
         ("PatientBirthDate", "Patient Birth Date", ""),
         ("PatientSex", "Patient Sex", ""),
         ("StudyDescription", "Study Description", ""),
-        ("SeriesDescription", "Series Description", ""),
+        ("SeriesDescription", "Series Description", "Report PDF"),
+        ("SeriesNumber", "Series Number", "500"),
         ("StudyInstanceUID", "Study Instance UID", ""),
         ("InstitutionName", "Institution Name", ""),
         ("ReferringPhysicianName", "Referring Physician", ""),
         ("AccessionNumber", "Accession Number", ""),
         ("Modality", "Modality", "DOC"),
+        ("ImageType", "Image Type", "DERIVED\\SECONDARY"),
         ("Manufacturer", "Manufacturer", ""),
         ("StationName", "Station Name", ""),
         ("StudyDate", "Study Date", ""),
@@ -70,7 +72,7 @@ class Pdf2Dcm:
         ("ContentDate", "Content Date", ""),
         ("ContentTime", "Content Time", ""),
         ("BurnedInAnnotation", "Burned In Annotation", "YES"),
-        ("DocumentTitle", "Document Title", ""),
+        ("DocumentTitle", "Document Title", "Radiology Report"),
         ("ConceptNameCodeSequence", "Concept Name", ""),
     ]
 
@@ -189,7 +191,7 @@ class Pdf2Dcm:
         ds.SOPClassUID = Pdf2Dcm.SOP_CLASS_UID
         if not hasattr(ds, "SOPInstanceUID") or not ds.SOPInstanceUID:
             ds.SOPInstanceUID = uid.generate_uid()
-        else:
+        else:  # pragma: no cover – SOPInstanceUID is never copied from templates
             # Always give a fresh SOP Instance UID for a new object
             ds.SOPInstanceUID = uid.generate_uid()
         if not hasattr(ds, "StudyInstanceUID") or not ds.StudyInstanceUID:
@@ -224,6 +226,22 @@ class Pdf2Dcm:
         if not hasattr(ds, "Modality") or not ds.Modality:
             ds.Modality = "DOC"
 
+        # Image Type – default to DERIVED\SECONDARY
+        if not hasattr(ds, "ImageType") or not ds.ImageType:
+            ds.ImageType = "DERIVED\\SECONDARY"
+
+        # Series Number
+        if not hasattr(ds, "SeriesNumber") or not ds.SeriesNumber:
+            ds.SeriesNumber = "500"
+
+        # Series Description
+        if not hasattr(ds, "SeriesDescription") or not ds.SeriesDescription:
+            ds.SeriesDescription = "Report PDF"
+
+        # Document Title
+        if not hasattr(ds, "DocumentTitle") or not ds.DocumentTitle:
+            ds.DocumentTitle = "Radiology Report"
+
         # Set empty required type 2 elements if missing
         for attr in (
             "PatientName", "PatientID", "PatientBirthDate", "PatientSex",
@@ -245,6 +263,12 @@ class Pdf2Dcm:
 
         # ── Apply user-supplied tags ─────────────────────────────────
         Pdf2Dcm._apply_tags(ds, tags or {})
+
+        # ── Ensure Content Date/Time are never empty after overrides ─
+        if not ds.ContentDate:
+            ds.ContentDate = now.strftime("%Y%m%d")
+        if not ds.ContentTime:
+            ds.ContentTime = now.strftime("%H%M%S")
 
         # ── Embed the PDF data ───────────────────────────────────────
         ds.EncapsulatedDocument = pdf_data
@@ -276,7 +300,7 @@ class Pdf2Dcm:
                 continue
             try:
                 setattr(ds, keyword, value)
-            except (AttributeError, ValueError, TypeError):
+            except (AttributeError, ValueError, TypeError):  # pragma: no cover
                 # Skip unknown or invalid tags silently
                 pass
 

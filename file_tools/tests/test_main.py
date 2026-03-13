@@ -76,12 +76,21 @@ def test_pdf_merge_success(client: TestClient) -> None:
 
 
 def test_pdf_merge_too_few_files(client: TestClient) -> None:
-    pdf1 = _make_pdf_bytes(1)
+    r = client.post(
+        "/api/pdf/merge",
+        files=[],
+    )
+    assert r.status_code == 422
+
+
+def test_pdf_merge_single_file(client: TestClient) -> None:
+    pdf1 = _make_pdf_bytes(2)
     r = client.post(
         "/api/pdf/merge",
         files=[("files", ("a.pdf", pdf1, "application/pdf"))],
     )
-    assert r.status_code == 422
+    assert r.status_code == 200
+    assert r.content[:4] == b"%PDF"
 
 
 def test_pdf_merge_corrupted_file(client: TestClient) -> None:
@@ -110,6 +119,65 @@ def test_pdf_merge_permission_error(client: TestClient) -> None:
         )
     assert r.status_code == 422
     assert "permission denied" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# PDF Merge by Path (desktop mode)
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_merge_by_path_success(client: TestClient, tmp_path: Path) -> None:
+    f1 = tmp_path / "a.pdf"
+    f2 = tmp_path / "b.pdf"
+    f1.write_bytes(_make_pdf_bytes(1))
+    f2.write_bytes(_make_pdf_bytes(2))
+    r = client.post(
+        "/api/pdf/merge-by-path",
+        data={"file_paths": f"{f1}\n{f2}"},
+    )
+    assert r.status_code == 200
+    assert r.content[:4] == b"%PDF"
+
+
+def test_pdf_merge_by_path_single_file(client: TestClient, tmp_path: Path) -> None:
+    f1 = tmp_path / "a.pdf"
+    f1.write_bytes(_make_pdf_bytes(3))
+    r = client.post(
+        "/api/pdf/merge-by-path",
+        data={"file_paths": str(f1)},
+    )
+    assert r.status_code == 200
+    assert r.content[:4] == b"%PDF"
+
+
+def test_pdf_merge_by_path_no_files(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf/merge-by-path",
+        data={"file_paths": ""},
+    )
+    assert r.status_code == 422
+
+
+def test_pdf_merge_by_path_missing_file(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf/merge-by-path",
+        data={"file_paths": "/nonexistent/file.pdf"},
+    )
+    assert r.status_code == 404
+
+
+def test_pdf_merge_by_path_no_open_handles(client: TestClient, tmp_path: Path) -> None:
+    """After merge-by-path, source files must not be locked."""
+    f1 = tmp_path / "a.pdf"
+    f1.write_bytes(_make_pdf_bytes(1))
+    r = client.post(
+        "/api/pdf/merge-by-path",
+        data={"file_paths": str(f1)},
+    )
+    assert r.status_code == 200
+    # Must be deletable immediately
+    f1.unlink()
+    assert not f1.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -803,3 +871,559 @@ def test_run_web_calls_uvicorn() -> None:
         from file_tools.main import run_web
         run_web(host="0.0.0.0", port=9999)
         mock_run.assert_called_once_with(app, host="0.0.0.0", port=9999)
+
+
+# ---------------------------------------------------------------------------
+# PDF Merge – ValueError / OSError error paths
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_merge_value_error(client: TestClient) -> None:
+    with patch("file_tools.main.merge_pdfs", side_effect=ValueError("bad")):
+        r = client.post(
+            "/api/pdf/merge",
+            files=[("files", ("a.pdf", b"fake", "application/pdf"))],
+        )
+    assert r.status_code == 422
+    assert "invalid input" in r.json()["detail"].lower()
+
+
+def test_pdf_merge_os_error(client: TestClient) -> None:
+    with patch("file_tools.main.merge_pdfs", side_effect=OSError("disk")):
+        r = client.post(
+            "/api/pdf/merge",
+            files=[("files", ("a.pdf", b"fake", "application/pdf"))],
+        )
+    assert r.status_code == 422
+    assert "merge failed" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# PDF Merge by Path – error paths
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_merge_by_path_empty_paths(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf/merge-by-path",
+        data={"file_paths": "   "},
+    )
+    assert r.status_code == 422
+
+
+def test_pdf_merge_by_path_value_error(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "a.pdf"
+    f.write_bytes(_make_pdf_bytes(1))
+    with patch("file_tools.main.merge_pdfs", side_effect=ValueError("bad")):
+        r = client.post(
+            "/api/pdf/merge-by-path",
+            data={"file_paths": str(f)},
+        )
+    assert r.status_code == 422
+    assert "invalid input" in r.json()["detail"].lower()
+
+
+def test_pdf_merge_by_path_permission_error(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "a.pdf"
+    f.write_bytes(_make_pdf_bytes(1))
+    with patch("file_tools.main.merge_pdfs", side_effect=PermissionError("locked")):
+        r = client.post(
+            "/api/pdf/merge-by-path",
+            data={"file_paths": str(f)},
+        )
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_pdf_merge_by_path_os_error(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "a.pdf"
+    f.write_bytes(_make_pdf_bytes(1))
+    with patch("file_tools.main.merge_pdfs", side_effect=OSError("disk")):
+        r = client.post(
+            "/api/pdf/merge-by-path",
+            data={"file_paths": str(f)},
+        )
+    assert r.status_code == 422
+    assert "merge failed" in r.json()["detail"].lower()
+
+
+def test_pdf_merge_by_path_generic_error(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "a.pdf"
+    f.write_bytes(_make_pdf_bytes(1))
+    with patch("file_tools.main.merge_pdfs", side_effect=RuntimeError("unexpected")):
+        r = client.post(
+            "/api/pdf/merge-by-path",
+            data={"file_paths": str(f)},
+        )
+    assert r.status_code == 500
+    assert "merge failed" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# PDF Split – additional error paths
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_split_corrupt_file(client: TestClient) -> None:
+    """Sending garbage data triggers Cannot read PDF error."""
+    r = client.post(
+        "/api/pdf/split",
+        data={"ranges": "1"},
+        files=[("file", ("test.pdf", b"not a pdf", "application/pdf"))],
+    )
+    assert r.status_code == 422
+    assert "cannot read pdf" in r.json()["detail"].lower()
+
+
+def test_pdf_split_no_ranges(client: TestClient) -> None:
+    """Empty ranges splits every page."""
+    pdf = _make_pdf_bytes(2)
+    r = client.post(
+        "/api/pdf/split",
+        data={"ranges": ""},
+        files=[("file", ("test.pdf", pdf, "application/pdf"))],
+    )
+    assert r.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert len(zf.namelist()) == 2
+
+
+def test_pdf_split_jpeg_output(client: TestClient) -> None:
+    """Split to JPEG output type."""
+    pdf = _make_pdf_bytes(2)
+    r = client.post(
+        "/api/pdf/split",
+        data={"ranges": "1", "output_type": "jpeg"},
+        files=[("file", ("test.pdf", pdf, "application/pdf"))],
+    )
+    assert r.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    names = zf.namelist()
+    assert len(names) == 1
+    assert names[0].endswith(".jpg")
+
+
+def test_pdf_split_os_error(client: TestClient) -> None:
+    pdf = _make_pdf_bytes(1)
+    with patch("file_tools.main.split_pdf", side_effect=OSError("disk")):
+        r = client.post(
+            "/api/pdf/split",
+            data={"ranges": "1"},
+            files=[("file", ("test.pdf", pdf, "application/pdf"))],
+        )
+    assert r.status_code == 422
+    assert "split failed" in r.json()["detail"].lower()
+
+
+def test_pdf_split_generic_error(client: TestClient) -> None:
+    pdf = _make_pdf_bytes(1)
+    with patch("file_tools.main.split_pdf", side_effect=RuntimeError("boom")):
+        r = client.post(
+            "/api/pdf/split",
+            data={"ranges": "1"},
+            files=[("file", ("test.pdf", pdf, "application/pdf"))],
+        )
+    assert r.status_code == 500
+    assert "split failed" in r.json()["detail"].lower()
+
+
+def test_pdf_split_value_error(client: TestClient) -> None:
+    pdf = _make_pdf_bytes(1)
+    with patch("file_tools.main.split_pdf", side_effect=ValueError("bad range")):
+        r = client.post(
+            "/api/pdf/split",
+            data={"ranges": "1"},
+            files=[("file", ("test.pdf", pdf, "application/pdf"))],
+        )
+    assert r.status_code == 422
+    assert "split failed" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Split to folder – additional paths
+# ---------------------------------------------------------------------------
+
+
+def test_split_to_folder_pdf_not_found(client: TestClient, tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    r = client.post(
+        "/api/pdf/split-to-folder",
+        json={"file_path": "/nonexistent.pdf", "output_dir": str(out_dir)},
+    )
+    assert r.status_code == 422
+    assert "pdf not found" in r.json()["detail"].lower()
+
+
+def test_split_to_folder_output_dir_not_found(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(1))
+    r = client.post(
+        "/api/pdf/split-to-folder",
+        json={"file_path": str(pdf), "output_dir": "/nonexistent/dir"},
+    )
+    assert r.status_code == 422
+    assert "output directory not found" in r.json()["detail"].lower()
+
+
+def test_split_to_folder_success(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(2))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    r = client.post(
+        "/api/pdf/split-to-folder",
+        json={
+            "file_path": str(pdf),
+            "output_dir": str(out_dir),
+            "confirmed": True,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["written"]) == 2
+
+
+def test_split_to_folder_with_ranges(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(3))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    r = client.post(
+        "/api/pdf/split-to-folder",
+        json={
+            "file_path": str(pdf),
+            "output_dir": str(out_dir),
+            "ranges": "1-2",
+            "confirmed": True,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["written"]) == 1
+
+
+def test_split_to_folder_conflict_check(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(1))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    # Pre-create the output file to trigger conflict
+    (out_dir / "test_1.pdf").write_text("existing")
+    r = client.post(
+        "/api/pdf/split-to-folder",
+        json={
+            "file_path": str(pdf),
+            "output_dir": str(out_dir),
+            "confirmed": False,
+        },
+    )
+    assert r.status_code == 200
+    assert len(r.json()["conflicts"]) == 1
+
+
+def test_split_to_folder_jpeg(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(1))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    r = client.post(
+        "/api/pdf/split-to-folder",
+        json={
+            "file_path": str(pdf),
+            "output_dir": str(out_dir),
+            "output_type": "jpeg",
+            "confirmed": True,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["written"]) == 1
+    assert data["written"][0].endswith(".jpg")
+
+
+def test_split_to_folder_permission_error(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(1))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with patch("file_tools.main.split_pdf", side_effect=PermissionError("denied")):
+        r = client.post(
+            "/api/pdf/split-to-folder",
+            json={
+                "file_path": str(pdf),
+                "output_dir": str(out_dir),
+                "confirmed": True,
+            },
+        )
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_split_to_folder_os_error(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(_make_pdf_bytes(1))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with patch("file_tools.main.split_pdf", side_effect=OSError("disk")):
+        r = client.post(
+            "/api/pdf/split-to-folder",
+            json={
+                "file_path": str(pdf),
+                "output_dir": str(out_dir),
+                "confirmed": True,
+            },
+        )
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Dedup – OSError on delete
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_delete_os_error(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "file.txt"
+    f.write_text("x")
+    with patch("file_tools.main.DedupScanner.delete_path", side_effect=OSError("fail")):
+        r = client.post(
+            "/api/dedup/delete",
+            json={"path": str(f), "is_dir": False},
+        )
+    assert r.status_code == 422
+    assert "delete failed" in r.json()["detail"].lower()
+
+
+def test_dedup_scan_os_error(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "d"
+    root.mkdir()
+    with patch("file_tools.main.DedupScanner") as mock_cls:
+        mock_cls.return_value.scan.side_effect = OSError("fail")
+        r = client.post("/api/dedup/scan", json={"directory": str(root)})
+    assert r.status_code == 200
+    assert "scan failed" in _sse_error(r).lower()
+
+
+# ---------------------------------------------------------------------------
+# Date Sort
+# ---------------------------------------------------------------------------
+
+
+def test_date_sort_preview_success(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "files"
+    root.mkdir()
+    (root / "a.txt").write_text("hello")
+    r = client.post("/api/date-sort/preview", json={"directory": str(root)})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert len(data["plan"]) == 1
+
+
+def test_date_sort_preview_not_a_dir(client: TestClient) -> None:
+    r = client.post("/api/date-sort/preview", json={"directory": "/nonexistent"})
+    assert r.status_code == 422
+
+
+def test_date_sort_preview_file_not_found(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "d"
+    root.mkdir()
+    with patch("file_tools.main.DateSorter") as mock_cls:
+        mock_cls.return_value.preview.side_effect = FileNotFoundError("gone")
+        r = client.post("/api/date-sort/preview", json={"directory": str(root)})
+    assert r.status_code == 422
+
+
+def test_date_sort_preview_permission_error(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "d"
+    root.mkdir()
+    with patch("file_tools.main.DateSorter") as mock_cls:
+        mock_cls.return_value.preview.side_effect = PermissionError("no access")
+        r = client.post("/api/date-sort/preview", json={"directory": str(root)})
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_date_sort_preview_os_error(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "d"
+    root.mkdir()
+    with patch("file_tools.main.DateSorter") as mock_cls:
+        mock_cls.return_value.preview.side_effect = OSError("io error")
+        r = client.post("/api/date-sort/preview", json={"directory": str(root)})
+    assert r.status_code == 422
+    assert "preview failed" in r.json()["detail"].lower()
+
+
+def test_date_sort_execute_success(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "files"
+    root.mkdir()
+    f = root / "a.txt"
+    f.write_text("hello")
+    plan = [{"file": "a.txt", "source": str(f), "folder": "2025/01_Jan",
+             "destination": str(root / "2025" / "01_Jan" / "a.txt")}]
+    r = client.post("/api/date-sort/execute", json={"plan": plan})
+    assert r.status_code == 200
+    assert r.json()["moved"] == 1
+
+
+def test_date_sort_execute_empty_plan(client: TestClient) -> None:
+    r = client.post("/api/date-sort/execute", json={"plan": []})
+    assert r.status_code == 422
+
+
+def test_date_sort_execute_permission_error(client: TestClient) -> None:
+    with patch("file_tools.main.DateSorter") as mock_cls:
+        mock_cls.return_value.execute.side_effect = PermissionError("no access")
+        r = client.post("/api/date-sort/execute", json={"plan": [{"file": "a"}]})
+    assert r.status_code == 422
+    assert "permission denied" in r.json()["detail"].lower()
+
+
+def test_date_sort_execute_os_error(client: TestClient) -> None:
+    with patch("file_tools.main.DateSorter") as mock_cls:
+        mock_cls.return_value.execute.side_effect = OSError("disk full")
+        r = client.post("/api/date-sort/execute", json={"plan": [{"file": "a"}]})
+    assert r.status_code == 422
+    assert "move failed" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# PDF2DCM convert – FileNotFoundError and generic exception
+# ---------------------------------------------------------------------------
+
+
+def test_pdf2dcm_convert_file_not_found(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF-1.4 data")
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.side_effect = FileNotFoundError("not found")
+        with open(pdf, "rb") as f:
+            r = client.post(
+                "/api/pdf2dcm/convert",
+                files={"pdf": ("test.pdf", f, "application/pdf")},
+                data={"tags_json": "{}"},
+            )
+    assert r.status_code == 422
+
+
+def test_pdf2dcm_convert_generic_error(client: TestClient, tmp_path: Path) -> None:
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF-1.4 data")
+    with patch("file_tools.main.Pdf2Dcm") as MockPdf2Dcm:
+        MockPdf2Dcm.convert.side_effect = RuntimeError("unexpected")
+        with open(pdf, "rb") as f:
+            r = client.post(
+                "/api/pdf2dcm/convert",
+                files={"pdf": ("test.pdf", f, "application/pdf")},
+                data={"tags_json": "{}"},
+            )
+    assert r.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# File open – success path
+# ---------------------------------------------------------------------------
+
+
+def test_file_open_success(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "test.txt"
+    f.write_text("hi")
+    with patch("os.startfile", create=True):
+        r = client.post("/api/file/open", json={"path": str(f)})
+    assert r.status_code == 200
+    assert r.json()["opened"] == str(f)
+
+
+# ---------------------------------------------------------------------------
+# Dialog endpoints – with custom file_types
+# ---------------------------------------------------------------------------
+
+
+def test_dialog_files_custom_types(client: TestClient) -> None:
+    mock_window = MagicMock()
+    mock_window.create_file_dialog.return_value = ["/tmp/a.dcm"]
+    set_webview_window(mock_window)
+
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
+        r = client.get("/api/dialog/files?file_types=DICOM (*.dcm)")
+    assert r.status_code == 200
+    assert r.json()["files"] == ["/tmp/a.dcm"]
+
+
+def test_dialog_save_no_desktop(client: TestClient) -> None:
+    r = client.get("/api/dialog/save")
+    assert r.status_code == 503
+
+
+def test_dialog_save_with_window(client: TestClient) -> None:
+    mock_window = MagicMock()
+    mock_window.create_file_dialog.return_value = "/tmp/out.pdf"
+    set_webview_window(mock_window)
+
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
+        r = client.get("/api/dialog/save?filename=test.pdf")
+    assert r.status_code == 200
+    assert r.json()["path"] == "/tmp/out.pdf"
+
+
+def test_dialog_save_with_custom_types(client: TestClient) -> None:
+    mock_window = MagicMock()
+    mock_window.create_file_dialog.return_value = "/tmp/out.dcm"
+    set_webview_window(mock_window)
+
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
+        r = client.get("/api/dialog/save?file_types=DICOM (*.dcm)")
+    assert r.status_code == 200
+
+
+def test_dialog_save_cancelled(client: TestClient) -> None:
+    mock_window = MagicMock()
+    mock_window.create_file_dialog.return_value = None
+    set_webview_window(mock_window)
+
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
+        r = client.get("/api/dialog/save")
+    assert r.status_code == 200
+    assert r.json()["path"] is None
+
+
+def test_dialog_save_returns_list(client: TestClient) -> None:
+    mock_window = MagicMock()
+    mock_window.create_file_dialog.return_value = ["/tmp/result.pdf"]
+    set_webview_window(mock_window)
+
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
+        r = client.get("/api/dialog/save")
+    assert r.status_code == 200
+    assert r.json()["path"] == "/tmp/result.pdf"
+
+
+# ---------------------------------------------------------------------------
+# File save endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_file_save(client: TestClient, tmp_path: Path) -> None:
+    dest = tmp_path / "saved.pdf"
+    r = client.post(
+        "/api/file/save",
+        data={"path": str(dest)},
+        files=[("file", ("test.pdf", b"PDF content", "application/pdf"))],
+    )
+    assert r.status_code == 200
+    assert dest.read_bytes() == b"PDF content"
+
+
+# ---------------------------------------------------------------------------
+# Dialog directory with default_dir
+# ---------------------------------------------------------------------------
+
+
+def test_dialog_directory_with_default_dir(client: TestClient, tmp_path: Path) -> None:
+    mock_window = MagicMock()
+    mock_window.create_file_dialog.return_value = [str(tmp_path)]
+    set_webview_window(mock_window)
+
+    with patch.dict("sys.modules", {"webview": _mock_webview()}):
+        r = client.get(f"/api/dialog/directory?default_dir={tmp_path}")
+    assert r.status_code == 200

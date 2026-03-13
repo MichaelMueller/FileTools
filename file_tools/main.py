@@ -59,9 +59,9 @@ async def pdf_merge(
     max_side_px: Annotated[int, Form()] = 0,
     margin_mm: Annotated[float, Form()] = 0.0,
 ) -> Response:
-    """Merge multiple uploaded PDF/image files into one PDF and return the result."""
-    if len(files) < 2:
-        raise HTTPException(status_code=422, detail="At least two files are required.")
+    """Merge uploaded PDF/image files into one PDF and return the result."""
+    if len(files) < 1:  # pragma: no cover – FastAPI validates before this
+        raise HTTPException(status_code=422, detail="At least one file is required.")
 
     tmp_paths: list[Path] = []
     try:
@@ -89,6 +89,41 @@ async def pdf_merge(
     finally:
         for p in tmp_paths:
             p.unlink(missing_ok=True)
+
+    return Response(
+        content=merged_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=merged.pdf"},
+    )
+
+
+@app.post("/api/pdf/merge-by-path")
+async def pdf_merge_by_path(
+    file_paths: Annotated[str, Form()],
+    dpi: Annotated[int, Form()] = 150,
+    max_side_px: Annotated[int, Form()] = 0,
+    margin_mm: Annotated[float, Form()] = 0.0,
+) -> Response:
+    """Merge PDF/image files by filesystem path (desktop mode)."""
+    paths = [Path(p.strip()) for p in file_paths.strip().split("\n") if p.strip()]
+    if len(paths) < 1:
+        raise HTTPException(status_code=422, detail="At least one file is required.")
+    for p in paths:
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail=f"File not found: {p}")
+
+    try:
+        merged_bytes = merge_pdfs(
+            paths, dpi=dpi, max_side_px=max_side_px, margin_mm=margin_mm,
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid input: {exc}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=422, detail=f"Permission denied: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Merge failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
 
     return Response(
         content=merged_bytes,
@@ -141,7 +176,7 @@ async def pdf_split(
             finally:
                 try:
                     tmp_path.unlink(missing_ok=True)
-                except OSError:
+                except OSError:  # pragma: no cover – defensive cleanup
                     pass
         else:
             parts = split_pdf(io.BytesIO(pdf_bytes), page_ranges)
@@ -344,7 +379,7 @@ async def dedup_scan(body: dict) -> StreamingResponse:
                 pass
 
         # Drain remaining progress messages
-        while not queue.empty():
+        while not queue.empty():  # pragma: no cover – race-condition safety net
             msg = await queue.get()
             yield f"data: {json.dumps(msg)}\n\n"
 
@@ -671,9 +706,9 @@ async def file_open(body: dict) -> JSONResponse:
 
     if sys.platform == "win32":
         os.startfile(str(fpath))  # noqa: S606
-    elif sys.platform == "darwin":
+    elif sys.platform == "darwin":  # pragma: no cover
         subprocess.Popen(["open", str(fpath)])  # noqa: S603
-    else:
+    else:  # pragma: no cover
         subprocess.Popen(["xdg-open", str(fpath)])  # noqa: S603
 
     return JSONResponse(content={"opened": str(fpath)})

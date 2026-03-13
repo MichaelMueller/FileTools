@@ -1,5 +1,93 @@
 # Agent Log
 
+## 2026-03-13 – Dir Compare: fix Browse buttons for browser mode
+
+### Summary
+`openDirDialog()` previously called `/api/dialog/directory` directly without mode detection, silently failing in browser mode. Now it auto-detects desktop vs browser: uses native dialog in pywebview, falls back to `webkitdirectory` file input in browser — matching the pattern used by Dedup Scanner and Date Sorter.
+
+### Changes
+- **`file_tools/static/index.html`** – Rewrote `openDirDialog()` to use `_detectDesktop()` with `default_dir` support and `webkitdirectory` fallback.
+
+---
+
+## 2026-03-13 15:05 – Unified "Add Files" button for PDF Merge
+
+### Summary
+Replaced the two separate buttons ("Add Files" for browser upload, "Browse" for pywebview native dialog) with a single **"Add Files"** button that auto-detects the mode on each click. In desktop/pywebview mode it opens the native file dialog; in browser mode it triggers the standard file-input upload.
+
+### Changes
+- **`file_tools/static/index.html`** – Removed `merge-add-files-btn` and `merge-browse-btn` IDs and the `initMergeButtons()` IIFE. Added a single button calling `mergeAddFiles()`, which queries `/api/mode` and dispatches to native dialog or file-input accordingly.
+
+---
+
+## 2026-03-13 14:48 – Achieve 100% test coverage
+
+### Summary
+Brought test coverage from 97.8% to **100%** across all 11 source files (1211 statements, 0 missing). 298 tests, all passing.
+
+### New tests added
+- **`test_date_sorter.py`** – `test_returns_none_for_image_with_empty_exif` (line 46), `test_returns_none_for_exif_without_date_tags` (line 59), `test_progress_callback_every_50` (line 133)
+- **`test_dedup_scanner.py`** – `test_file_hash_oserror_skips_file` (lines 101-102), `test_build_groups_file_stat_oserror` (lines 228-229), `test_filter_nested_dirs_dominated` (lines 256-257), `test_filter_files_in_dup_dirs_keeps_outside` (lines 279-280)
+- **`test_installer_builder.py`** – `test_clean_on_rm_error_file` / `test_clean_on_rm_error_dir` (lines 89-93), `test_install_deps_with_preseed` (lines 162-171 + line 164 dst.exists), `test_install_deps_skips_comments_and_known_pkgs` (lines 185, 189), `test_make_venv_portable_existing_dlls` (line 259), updated `test_create_venv_copies_fallback` (line 121)
+
+### Coverage breakdown (all 100%)
+| File | Statements |
+|------|-----------|
+| `__init__.py` | 1 |
+| `desktop.py` | 49 |
+| `main.py` | 409 |
+| `splash.py` | 61 |
+| `date_sorter.py` | 76 |
+| `dedup_scanner.py` | 160 |
+| `dir_compare.py` | 37 |
+| `installer_builder.py` | 171 |
+| `pdf2dcm.py` | 143 |
+| `pdf_tools.py` | 104 |
+| **Total** | **1211** |
+
+---
+
+## 2026-03-13 – PDF 2 DCM: mandatory DICOM tag inputs
+
+### Summary
+Added dedicated UI input fields and backend defaults for mandatory DICOM tags in the PDF 2 DCM tool, so they are always visible and always set in the output.
+
+### Mandatory fields (always shown in UI)
+| Tag | Keyword | Default |
+|-----|---------|---------|
+| (0008,0060) Modality | `Modality` | `DOC` (dropdown: DOC / OT) |
+| (0020,0011) Series Number | `SeriesNumber` | `500` |
+| (0008,103E) Series Description | `SeriesDescription` | `Report PDF` |
+| (0042,0010) Document Title | `DocumentTitle` | `Radiology Report` |
+| (0008,0008) Image Type | `ImageType` | `DERIVED\SECONDARY` |
+| (0008,0070) Manufacturer | `Manufacturer` | *(optional, blank)* |
+| (0008,0023) Content Date | `ContentDate` | auto-filled, never empty |
+| (0008,0033) Content Time | `ContentTime` | auto-filled, never empty |
+
+### Changes
+- **`file_tools/static/index.html`** – Added 6 fixed input fields (Modality, Series Number, Series Description, Document Title, Image Type, Manufacturer) above the dynamic tag list. New `_dcmCollectAllTags()` helper merges fixed + additional tags. Config save/load includes the fixed fields.
+- **`file_tools/tools/pdf2dcm.py`** – Updated `COMMON_TAGS` with defaults for ImageType, SeriesNumber, SeriesDescription, DocumentTitle. `_build_dataset()` now sets ImageType, SeriesNumber, SeriesDescription, DocumentTitle if missing. ContentDate/ContentTime are re-checked after user tags are applied so they can never be blank.
+- **`file_tools/tests/test_pdf2dcm.py`** – Added tests: `test_default_image_type`, `test_default_series_number`, `test_default_series_description`, `test_default_document_title`, `test_content_date_always_set`, `test_contains_image_type`, `test_contains_series_number`, `test_contains_document_title`.
+
+---
+
+## 2026-03-13 – PDF Merge: UI improvements, single-file support, file handle fix
+
+### Summary
+Three changes to the PDF Merge tool:
+1. **Hide "Add Files" in desktop mode** – In pywebview, only the native "Browse" button is shown; in browser mode, only "Add Files" is shown.
+2. **Allow single-file merge** – Minimum file count reduced from 2 to 1 in frontend, backend `/api/pdf/merge`, and the new `/api/pdf/merge-by-path` endpoint.
+3. **Fix open file handles** – All file reads in `pdf_tools.py` now load bytes into memory first (`path.read_bytes()`) so source files are never locked by FileTools.
+
+### Changes
+- **`file_tools/static/index.html`** – Added `id` attributes to Add Files / Browse buttons; added `initMergeButtons()` IIFE that detects desktop mode and toggles visibility; changed merge minimum from 2→1 in both desktop-path and browser-upload code paths.
+- **`file_tools/main.py`** – Changed `/api/pdf/merge` minimum from 2→1; added new `/api/pdf/merge-by-path` endpoint for desktop mode that accepts newline-separated filesystem paths.
+- **`file_tools/tools/pdf_tools.py`** – `image_to_pdf()` reads image bytes into memory before opening with Pillow; `merge_pdfs()` reads PDF bytes via `path.read_bytes()` instead of passing file path to `PdfReader`; `split_pdf()` reads file bytes into memory; `split_pdf_to_images()` passes bytes to `pdfium.PdfDocument()`.
+- **`file_tools/tests/test_main.py`** – Updated `test_pdf_merge_too_few_files` to send zero files; added `test_pdf_merge_single_file`; added tests for `/api/pdf/merge-by-path` (success, single file, no files, missing file, no open handles).
+- **`file_tools/tests/test_pdf_tools.py`** – Added `test_merge_pdfs_no_open_handles` verifying source files can be deleted after merge.
+
+---
+
 ## 2026-03-03 14:49 – Remove GPS Sorter, bump to v1.3.5, rebuild installer
 
 ### Summary

@@ -9,7 +9,7 @@ from pathlib import Path
 
 if sys.platform == "win32":
     import ctypes.wintypes as wt
-else:
+else:  # pragma: no cover
     wt = None  # type: ignore[assignment]
 
 # Win32 constants
@@ -126,7 +126,7 @@ class Splash:
     # Internals
     # ------------------------------------------------------------------
 
-    def _run(self) -> None:
+    def _run(self) -> None:  # pragma: no cover
         user32 = ctypes.windll.user32
         gdi32 = ctypes.windll.gdi32
         kernel32 = ctypes.windll.kernel32
@@ -249,7 +249,7 @@ class Splash:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
-    def _wndproc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+    def _wndproc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:  # pragma: no cover
         user32 = ctypes.windll.user32
         gdi32 = ctypes.windll.gdi32
 

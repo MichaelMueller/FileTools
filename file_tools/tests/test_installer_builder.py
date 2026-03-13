@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -219,11 +221,162 @@ class TestSteps:
             nonlocal call_count
             call_count += 1
             if "--copies" in cmd:
+                # Create the venv_dir so the rmtree path is hit
+                venv_dir = builder._staging / "app" / ".venv"
+                venv_dir.mkdir(parents=True, exist_ok=True)
                 raise subprocess.CalledProcessError(1, cmd)
 
         with patch("subprocess.check_call", side_effect=_side_effect):
             builder._create_venv()
         assert call_count == 2  # first with --copies, then without
+
+    def test_clean_on_rm_error_file(self, builder: InstallerBuilder, tmp_path: Path) -> None:
+        """_on_rm_error handles read-only files during clean."""
+        builder._clean()
+        builder._create_staging()
+        # Create a read-only file in staging
+        ro_file = builder._staging / "readonly.txt"
+        ro_file.write_text("locked")
+        ro_file.chmod(0o444)
+        # Clean should succeed (using _on_rm_error)
+        builder._clean()
+        assert not ro_file.exists()
+
+    def test_clean_on_rm_error_dir(self, builder: InstallerBuilder) -> None:
+        """_on_rm_error handles read-only directories during clean."""
+        builder._clean()
+        builder._create_staging()
+        # Create a read-only directory
+        ro_dir = builder._staging / "locked_dir"
+        ro_dir.mkdir()
+        ro_dir.chmod(0o444)
+        # Clean should succeed
+        builder._clean()
+        assert not ro_dir.exists()
+
+    def test_install_deps_with_preseed(self, builder: InstallerBuilder) -> None:
+        """_install_deps copies pre-seed packages from dev venv."""
+        builder._clean()
+        builder._create_staging()
+
+        # Set up dev venv with site-packages and a python exe
+        dev_venv = builder.project_root / ".venv"
+        dev_sp = dev_venv / "Lib" / "site-packages"
+        dev_sp.mkdir(parents=True, exist_ok=True)
+        dev_python = dev_venv / "Scripts" / "python.exe"
+        dev_python.parent.mkdir(parents=True, exist_ok=True)
+        dev_python.write_bytes(b"EXE")
+
+        # Create pre-seed packages (both file and directory)
+        (dev_sp / "clr.py").write_text("# clr shim")
+        pythonnet_dir = dev_sp / "pythonnet"
+        pythonnet_dir.mkdir()
+        (pythonnet_dir / "__init__.py").write_text("# pythonnet")
+        (dev_sp / "cffi").mkdir()
+        (dev_sp / "cffi" / "__init__.py").write_text("# cffi")
+        (dev_sp / "_cffi_backend.pyd").write_bytes(b"PYD")
+
+        # Staging venv + pip + site-packages must exist
+        staging_venv = builder._staging / "app" / ".venv"
+        staging_sp = staging_venv / "Lib" / "site-packages"
+        staging_sp.mkdir(parents=True, exist_ok=True)
+        pip_exe = staging_venv / "Scripts" / "pip.exe"
+        pip_exe.parent.mkdir(parents=True, exist_ok=True)
+        pip_exe.write_bytes(b"EXE")
+
+        # Pre-create one destination so the "dst.exists() → continue" branch is hit
+        (staging_sp / "clr.py").write_text("# already there")
+
+        freeze_output = "click==8.1.7\npythonnet==3.0.3\n"
+        with (
+            patch("subprocess.check_output", return_value=freeze_output),
+            patch("subprocess.check_call"),
+        ):
+            builder._install_deps()
+
+        # Pre-seed packages should be copied
+        assert (staging_sp / "clr.py").exists()
+        assert (staging_sp / "pythonnet" / "__init__.py").exists()
+        assert (staging_sp / "cffi" / "__init__.py").exists()
+        assert (staging_sp / "_cffi_backend.pyd").exists()
+
+    def test_install_deps_skips_comments_and_known_pkgs(
+        self, builder: InstallerBuilder,
+    ) -> None:
+        """_install_deps filters comments, empty lines, and known packages."""
+        builder._clean()
+        builder._create_staging()
+
+        dev_venv = builder.project_root / ".venv"
+        dev_sp = dev_venv / "Lib" / "site-packages"
+        dev_sp.mkdir(parents=True, exist_ok=True)
+        dev_python = dev_venv / "Scripts" / "python.exe"
+        dev_python.parent.mkdir(parents=True, exist_ok=True)
+        dev_python.write_bytes(b"EXE")
+
+        staging_venv = builder._staging / "app" / ".venv"
+        staging_sp = staging_venv / "Lib" / "site-packages"
+        staging_sp.mkdir(parents=True, exist_ok=True)
+        pip_exe = staging_venv / "Scripts" / "pip.exe"
+        pip_exe.parent.mkdir(parents=True, exist_ok=True)
+        pip_exe.write_bytes(b"EXE")
+
+        # Freeze output with comments, empty lines, "-e" editable, and skip-listed pkgs
+        freeze_output = (
+            "# This is a comment\n"
+            "\n"
+            "-e git+https://example.com#egg=something\n"
+            "pip==23.0\n"
+            "setuptools==69.0\n"
+            "wheel==0.42\n"
+            "file-tools==1.0\n"
+            "click==8.1.7\n"
+        )
+        with (
+            patch("subprocess.check_output", return_value=freeze_output),
+            patch("subprocess.check_call"),
+        ):
+            builder._install_deps()
+
+        # Only click should be in the requirements file
+        req_file = builder._staging / "requirements.txt"
+        content = req_file.read_text()
+        assert "click==8.1.7" in content
+        assert "pip" not in content
+        assert "setuptools" not in content
+        assert "file-tools" not in content
+        assert "comment" not in content
+
+    def test_make_venv_portable_existing_dlls(
+        self, builder: InstallerBuilder, tmp_path: Path,
+    ) -> None:
+        """_make_venv_portable removes existing DLLs dir before copying."""
+        builder._clean()
+        builder._create_staging()
+        venv_dir = builder._staging / "app" / ".venv"
+        venv_dir.mkdir(parents=True, exist_ok=True)
+        venv_lib = venv_dir / "Lib" / "site-packages"
+        venv_lib.mkdir(parents=True)
+
+        # Pre-existing DLLs directory
+        venv_dlls = venv_dir / "DLLs"
+        venv_dlls.mkdir()
+        (venv_dlls / "old.pyd").write_bytes(b"OLD")
+
+        # Fake base Python
+        fake_base = tmp_path / "fake_python"
+        fake_base.mkdir()
+        (fake_base / "python.exe").write_bytes(b"EXE")
+        dlls_dir = fake_base / "DLLs"
+        dlls_dir.mkdir()
+        (dlls_dir / "_ssl.pyd").write_bytes(b"NEW")
+
+        with patch.object(builder, "_base_python_dir", return_value=fake_base):
+            builder._make_venv_portable()
+
+        # Old file should be gone, new file present
+        assert not (venv_dlls / "old.pyd").exists()
+        assert (venv_dlls / "_ssl.pyd").exists()
 
     def test_install_deps(self, builder: InstallerBuilder) -> None:
         builder._clean()

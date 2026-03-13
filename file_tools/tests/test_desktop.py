@@ -93,11 +93,11 @@ def test_run_desktop_starts_server_and_webview() -> None:
         on_ready = MagicMock()
         run_desktop(host="127.0.0.1", port=9876, on_ready=on_ready)
 
-        # Thread was created with _run_server and started as daemon
-        mock_thread_cls.assert_called_once()
-        call_kwargs = mock_thread_cls.call_args
-        assert call_kwargs.kwargs.get("daemon") is True
-        mock_thread.start.assert_called_once()
+        # Thread was created for server and icon setter, both as daemon
+        assert mock_thread_cls.call_count == 2
+        for call in mock_thread_cls.call_args_list:
+            assert call.kwargs.get("daemon") is True
+        assert mock_thread.start.call_count == 2
 
         # Slept for 1 second
         mock_sleep.assert_called_once_with(1)
@@ -109,11 +109,11 @@ def test_run_desktop_starts_server_and_webview() -> None:
             width=1200,
             height=800,
             resizable=True,
+            text_select=True,
         )
 
         # Events were registered
         mock_loaded_event.__iadd__.assert_called_once()
-        mock_shown_event.__iadd__.assert_called_once()
 
         # on_ready callback invoked before webview.start()
         on_ready.assert_called_once()

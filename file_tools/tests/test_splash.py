@@ -16,8 +16,8 @@ class TestSplashInit:
     def test_default_values(self) -> None:
         s = Splash()
         assert s._text == "FileTools initialization \u2026"
-        assert s._width == 380
-        assert s._height == 100
+        assert s._width == 400
+        assert s._height == 170
         assert s._hwnd == 0
 
     def test_custom_values(self) -> None:

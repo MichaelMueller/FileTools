@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -215,3 +216,87 @@ class TestDedupScanner:
         # Last call should match final totals
         last_files, _ = calls[-1]
         assert last_files >= 6  # at least 6 files in dup_tree
+
+    def test_file_hash_oserror_skips_file(self, tmp_path: Path, dedup_db: str) -> None:
+        """Files that raise OSError during hashing are silently skipped."""
+        root = tmp_path / "oserr"
+        root.mkdir()
+        (root / "good.txt").write_text("data")
+        (root / "bad.txt").write_text("data")
+
+        scanner = DedupScanner(db_url=dedup_db)
+        orig_file_hash = scanner._file_hash
+
+        def _failing_hash(session, fpath):  # noqa: ANN001,ANN202
+            if fpath.name == "bad.txt":
+                raise OSError("access denied")
+            return orig_file_hash(session, fpath)
+
+        with patch.object(scanner, "_file_hash", side_effect=_failing_hash):
+            result = scanner.scan(root)
+        # Only 1 file should be counted (good.txt), bad.txt skipped
+        assert result["stats"]["total_files"] == 1
+
+    def test_build_groups_file_stat_oserror(self) -> None:
+        """_build_groups handles OSError on file stat by setting size=0."""
+        hashes = {"/fake/a.txt": "abc123", "/fake/b.txt": "abc123"}
+        with patch("pathlib.Path.stat", side_effect=OSError("gone")):
+            groups = DedupScanner._build_groups(hashes, is_dir=False)
+        assert len(groups) == 1
+        for item in groups[0]["items"]:
+            assert item["size"] == 0
+
+    def test_filter_nested_dirs_dominated(self, tmp_path: Path) -> None:
+        """Dominated directory groups are removed and paths discarded."""
+        # Use real paths so str(Path(...).parent) is consistent on Windows
+        root = str(tmp_path / "root")
+        a = str(tmp_path / "root" / "A")
+        b = str(tmp_path / "root" / "B")
+        a_sub = str(tmp_path / "root" / "A" / "sub")
+        b_sub = str(tmp_path / "root" / "B" / "sub")
+        groups = [
+            {
+                "hash": "parent_hash",
+                "items": [
+                    {"path": a, "size": 100, "is_dir": True},
+                    {"path": b, "size": 100, "is_dir": True},
+                ],
+            },
+            {
+                "hash": "child_hash",
+                "items": [
+                    {"path": a_sub, "size": 50, "is_dir": True},
+                    {"path": b_sub, "size": 50, "is_dir": True},
+                ],
+            },
+        ]
+        filtered = DedupScanner._filter_nested_dirs(groups)
+        # Parent group survives; child group is dominated (parents are dup dirs)
+        assert len(filtered) == 1
+        assert filtered[0]["hash"] == "parent_hash"
+
+    def test_filter_files_in_dup_dirs_keeps_outside(self, tmp_path: Path) -> None:
+        """File groups with >=2 members outside dup dirs are kept (filtered)."""
+        a = str(tmp_path / "A")
+        b = str(tmp_path / "B")
+        c = str(tmp_path / "C")
+        d = str(tmp_path / "D")
+        dup_dir_paths = {a, b}
+        file_groups = [
+            {
+                "hash": "fhash",
+                "items": [
+                    {"path": a + os.sep + "f.txt", "size": 10, "is_dir": False},
+                    {"path": b + os.sep + "f.txt", "size": 10, "is_dir": False},
+                    {"path": c + os.sep + "f.txt", "size": 10, "is_dir": False},
+                    {"path": d + os.sep + "f.txt", "size": 10, "is_dir": False},
+                ],
+            },
+        ]
+        filtered = DedupScanner._filter_files_in_dup_dirs(file_groups, dup_dir_paths)
+        # Members inside dup dirs (A, B) removed; C, D remain → group kept
+        assert len(filtered) == 1
+        paths = {i["path"] for i in filtered[0]["items"]}
+        assert c + os.sep + "f.txt" in paths
+        assert d + os.sep + "f.txt" in paths
+        assert a + os.sep + "f.txt" not in paths

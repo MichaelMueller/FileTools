@@ -96,6 +96,18 @@ class TestCommonTags:
         keywords = [t["keyword"] for t in Pdf2Dcm.common_tags()]
         assert "SeriesDescription" in keywords
 
+    def test_contains_image_type(self) -> None:
+        keywords = [t["keyword"] for t in Pdf2Dcm.common_tags()]
+        assert "ImageType" in keywords
+
+    def test_contains_series_number(self) -> None:
+        keywords = [t["keyword"] for t in Pdf2Dcm.common_tags()]
+        assert "SeriesNumber" in keywords
+
+    def test_contains_document_title(self) -> None:
+        keywords = [t["keyword"] for t in Pdf2Dcm.common_tags()]
+        assert "DocumentTitle" in keywords
+
 
 # ---------------------------------------------------------------------------
 # convert – basic
@@ -167,6 +179,33 @@ class TestConvertBasic:
         assert hasattr(ds, "PatientName")
         assert hasattr(ds, "PatientID")
         assert hasattr(ds, "AccessionNumber")
+
+    def test_default_image_type(self, sample_pdf: Path) -> None:
+        dcm_bytes = Pdf2Dcm.convert(sample_pdf)
+        ds = dcmread(io.BytesIO(dcm_bytes))
+        assert ds.ImageType == ["DERIVED", "SECONDARY"]
+
+    def test_default_series_number(self, sample_pdf: Path) -> None:
+        dcm_bytes = Pdf2Dcm.convert(sample_pdf)
+        ds = dcmread(io.BytesIO(dcm_bytes))
+        assert ds.SeriesNumber == "500"
+
+    def test_default_series_description(self, sample_pdf: Path) -> None:
+        dcm_bytes = Pdf2Dcm.convert(sample_pdf)
+        ds = dcmread(io.BytesIO(dcm_bytes))
+        assert ds.SeriesDescription == "Report PDF"
+
+    def test_default_document_title(self, sample_pdf: Path) -> None:
+        dcm_bytes = Pdf2Dcm.convert(sample_pdf)
+        ds = dcmread(io.BytesIO(dcm_bytes))
+        assert ds.DocumentTitle == "Radiology Report"
+
+    def test_content_date_always_set(self, sample_pdf: Path) -> None:
+        """ContentDate/ContentTime must never be empty, even if overridden with blank."""
+        dcm_bytes = Pdf2Dcm.convert(sample_pdf, tags={"ContentDate": "", "ContentTime": ""})
+        ds = dcmread(io.BytesIO(dcm_bytes))
+        assert ds.ContentDate
+        assert ds.ContentTime
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +359,17 @@ class TestConvertErrors:
     def test_string_path(self, sample_pdf: Path) -> None:
         dcm_bytes = Pdf2Dcm.convert(str(sample_pdf))
         assert isinstance(dcm_bytes, bytes)
+
+
+class TestDefaultDbUrl:
+    """Test Pdf2Dcm with default db_url (user_data_dir)."""
+
+    def test_init_default_db(self, tmp_path: Path) -> None:
+        """When db_url is None, uses user_data_dir to create the DB."""
+        fake_dir = tmp_path / "appdata" / "FileTools"
+        with patch("file_tools.tools.pdf2dcm.user_data_dir", return_value=str(fake_dir)):
+            p = Pdf2Dcm()
+        assert (fake_dir / "filetools_pdf2dcm.db").exists()
 
 
 # ---------------------------------------------------------------------------

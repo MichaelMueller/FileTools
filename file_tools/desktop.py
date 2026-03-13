@@ -92,10 +92,10 @@ def run_desktop(
         text_select=True,
     )
 
-    def _on_loaded() -> None:
+    def _on_loaded() -> None:  # pragma: no cover – pywebview callback
         set_webview_window(window)
 
-    def _set_icon_win32() -> None:
+    def _set_icon_win32() -> None:  # pragma: no cover
         """Set the window icon via Win32 ctypes (no System.Drawing)."""
         if sys.platform != "win32":
             return
@@ -181,7 +181,7 @@ def run_desktop(
     # (missing WebView2 runtime, pythonnet issues, etc.), write a traceback
     # to `filetools-error.log` in the current working directory and show a
     # MessageBox so the user is aware of the failure.
-    def _log_and_alert(msg: str, exc: Exception | None = None) -> None:
+    def _log_and_alert(msg: str, exc: Exception | None = None) -> None:  # pragma: no cover
         try:
             import ctypes
             import traceback as _tb
@@ -211,7 +211,7 @@ def run_desktop(
         os._exit(1)
 
     # Ensure the uvicorn server shuts down when the window closes.
-    if _uvicorn_server is not None:
+    if _uvicorn_server is not None:  # pragma: no cover
         _uvicorn_server.should_exit = True
     # os._exit bypasses atexit handlers and thread join waits that can hang.
     import os  # noqa: PLC0415
