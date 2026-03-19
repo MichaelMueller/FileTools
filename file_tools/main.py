@@ -14,21 +14,13 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from file_tools.tools.dir_compare import compare_directories, sync_directories
-from file_tools.tools.dedup_scanner import DedupScanner
-from file_tools.tools.date_sorter import DateSorter
-from file_tools.tools.pdf_tools import (
-    merge_pdfs,
-    parse_page_ranges,
-    split_pdf,
-    split_pdf_to_images,
-)
-from file_tools.tools.pdf2dcm import Pdf2Dcm
+# Tool imports are deferred to the endpoint functions that need them to
+# keep application startup fast (avoids loading PIL, pypdf, pydicom, … eagerly).
 
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="FileTools", version="1.3.1")
+app = FastAPI(title="FileTools", version="1.3.7")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -60,6 +52,8 @@ async def pdf_merge(
     margin_mm: Annotated[float, Form()] = 0.0,
 ) -> Response:
     """Merge uploaded PDF/image files into one PDF and return the result."""
+    from file_tools.tools.pdf_tools import merge_pdfs  # noqa: PLC0415
+
     if len(files) < 1:  # pragma: no cover – FastAPI validates before this
         raise HTTPException(status_code=422, detail="At least one file is required.")
 
@@ -105,6 +99,8 @@ async def pdf_merge_by_path(
     margin_mm: Annotated[float, Form()] = 0.0,
 ) -> Response:
     """Merge PDF/image files by filesystem path (desktop mode)."""
+    from file_tools.tools.pdf_tools import merge_pdfs  # noqa: PLC0415
+
     paths = [Path(p.strip()) for p in file_paths.strip().split("\n") if p.strip()]
     if len(paths) < 1:
         raise HTTPException(status_code=422, detail="At least one file is required.")
@@ -143,6 +139,10 @@ async def pdf_split(
     If *ranges* is empty every page becomes its own file.
     *output_type* can be ``pdf`` or ``jpeg``.
     """
+    from file_tools.tools.pdf_tools import (  # noqa: PLC0415
+        parse_page_ranges, split_pdf, split_pdf_to_images,
+    )
+
     pdf_bytes = await file.read()
 
     from pypdf import PdfReader as _Reader  # noqa: PLC0415
@@ -226,6 +226,10 @@ async def pdf_split_to_folder(body: dict) -> JSONResponse:
     dpi: int = int(body.get("dpi", 150))
     confirmed: bool = bool(body.get("confirmed", False))
 
+    from file_tools.tools.pdf_tools import (  # noqa: PLC0415
+        parse_page_ranges, split_pdf, split_pdf_to_images,
+    )
+
     if not file_path.is_file():
         raise HTTPException(status_code=422, detail=f"PDF not found: {file_path}")
     if not output_dir.is_dir():
@@ -286,6 +290,8 @@ async def dir_compare(
     target: Annotated[str, Form()],
 ) -> JSONResponse:
     """Compare *source* and *target* directories and return the diff."""
+    from file_tools.tools.dir_compare import compare_directories  # noqa: PLC0415
+
     src = Path(source)
     tgt = Path(target)
     if not src.is_dir():
@@ -311,6 +317,8 @@ async def dir_sync(
 
     Optionally restrict to a newline-separated list of relative paths in *files*.
     """
+    from file_tools.tools.dir_compare import sync_directories  # noqa: PLC0415
+
     src = Path(source)
     tgt = Path(target)
     if not src.is_dir():
@@ -353,6 +361,8 @@ async def dedup_scan(body: dict) -> StreamingResponse:
     root = Path(directory)
     if not root.is_dir():
         raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
+
+    from file_tools.tools.dedup_scanner import DedupScanner  # noqa: PLC0415
 
     scanner = DedupScanner(db_url=_dedup_db_url)
 
@@ -412,6 +422,8 @@ async def dedup_delete(body: dict) -> JSONResponse:
     if not is_dir and not target.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {path_str}")
 
+    from file_tools.tools.dedup_scanner import DedupScanner  # noqa: PLC0415
+
     try:
         DedupScanner.delete_path(target)
     except FileNotFoundError as exc:
@@ -436,6 +448,8 @@ async def date_sort_preview(body: dict) -> JSONResponse:
     if not root.is_dir():
         raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
 
+    from file_tools.tools.date_sorter import DateSorter  # noqa: PLC0415
+
     sorter = DateSorter()
     try:
         plan = sorter.preview(root)
@@ -455,6 +469,8 @@ async def date_sort_execute(body: dict) -> JSONResponse:
     plan = body.get("plan", [])
     if not plan:
         raise HTTPException(status_code=422, detail="Empty plan – nothing to move.")
+
+    from file_tools.tools.date_sorter import DateSorter  # noqa: PLC0415
 
     sorter = DateSorter()
     try:
@@ -477,12 +493,16 @@ _pdf2dcm_db_url: str | None = None  # let Pdf2Dcm use its default
 @app.get("/api/pdf2dcm/tags")
 async def pdf2dcm_tags() -> JSONResponse:
     """Return the list of common DICOM tags for the frontend dropdown."""
+    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+
     return JSONResponse(content={"tags": Pdf2Dcm.common_tags()})
 
 
 @app.get("/api/pdf2dcm/configs")
 async def pdf2dcm_configs() -> JSONResponse:
     """Return all saved tag configurations."""
+    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+
     p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
     return JSONResponse(content={"configs": p.get_configs()})
 
@@ -497,6 +517,8 @@ async def pdf2dcm_save_config(body: dict) -> JSONResponse:
     if not name:
         raise HTTPException(status_code=422, detail="name is required.")
     tags = body.get("tags") or {}
+    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+
     p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
     cfg = p.save_config(name, tags)
     return JSONResponse(content=cfg)
@@ -505,6 +527,8 @@ async def pdf2dcm_save_config(body: dict) -> JSONResponse:
 @app.delete("/api/pdf2dcm/configs/{config_id}")
 async def pdf2dcm_delete_config(config_id: int) -> JSONResponse:
     """Delete a tag configuration by ID."""
+    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+
     p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
     if not p.delete_config(config_id):
         raise HTTPException(status_code=404, detail="Config not found.")
@@ -550,6 +574,8 @@ async def pdf2dcm_convert(
                 tmp_tmpl.write(tmpl_data)
                 tmp_tmpl_path = Path(tmp_tmpl.name)
 
+    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+
     try:
         dcm_bytes = Pdf2Dcm.convert(
             tmp_pdf_path,
@@ -589,6 +615,8 @@ async def pdf2dcm_convert_desktop(body: dict) -> JSONResponse:
     if not output_path:
         raise HTTPException(status_code=422, detail="output_path is required.")
 
+    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+
     try:
         dcm_bytes = Pdf2Dcm.convert(
             Path(pdf_path),
@@ -604,6 +632,88 @@ async def pdf2dcm_convert_desktop(body: dict) -> JSONResponse:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(dcm_bytes)
     return JSONResponse(content={"saved": str(dest)})
+
+
+# ---------------------------------------------------------------------------
+# Image Shrinker
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/image/shrink-by-path")
+async def image_shrink_by_path(
+    file_paths: Annotated[str, Form()],
+    scale_percent: Annotated[int, Form()] = 0,
+    max_width: Annotated[int, Form()] = 0,
+    max_height: Annotated[int, Form()] = 0,
+    replace: Annotated[bool, Form()] = False,
+) -> JSONResponse:
+    """Shrink images by filesystem path (desktop mode)."""
+    from file_tools.tools.image_shrinker import ImageShrinker  # noqa: PLC0415
+
+    paths = [Path(p.strip()) for p in file_paths.strip().split("\n") if p.strip()]
+    if not paths:
+        raise HTTPException(status_code=422, detail="At least one file is required.")
+    try:
+        results = ImageShrinker.shrink(
+            paths,
+            scale_percent=scale_percent,
+            max_width=max_width,
+            max_height=max_height,
+            replace=replace,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Shrink failed: {exc}") from exc
+    return JSONResponse(content={"results": results, "count": len(results)})
+
+
+@app.post("/api/image/shrink")
+async def image_shrink(
+    files: Annotated[list[UploadFile], File()],
+    scale_percent: Annotated[int, Form()] = 0,
+    max_width: Annotated[int, Form()] = 0,
+    max_height: Annotated[int, Form()] = 0,
+) -> Response:
+    """Shrink uploaded images, return a zip of the resized files."""
+    import tempfile
+    from file_tools.tools.image_shrinker import ImageShrinker  # noqa: PLC0415
+
+    tmp_paths: list[Path] = []
+    try:
+        for upload in files:
+            suffix = Path(upload.filename or "image.jpg").suffix or ".jpg"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                content = await upload.read()
+                tmp.write(content)
+                tmp_paths.append(Path(tmp.name))
+
+        try:
+            ImageShrinker.shrink(
+                tmp_paths,
+                scale_percent=scale_percent,
+                max_width=max_width,
+                max_height=max_height,
+                replace=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Shrink failed: {exc}") from exc
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for orig_upload, tmp_p in zip(files, tmp_paths):
+                zf.writestr(orig_upload.filename or tmp_p.name, tmp_p.read_bytes())
+        buf.seek(0)
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=shrinked.zip"},
+        )
+    finally:
+        for p in tmp_paths:
+            p.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +736,7 @@ async def mode_check() -> JSONResponse:
 async def dialog_files(multiple: bool = True, file_types: str = "") -> JSONResponse:
     """Open a native file-open dialog (desktop / pywebview mode only).
 
-    *file_types* is a semicolon-separated list of filter strings.
+    *file_types* is a pipe-separated list of filter strings.
     If empty, defaults to PDF + Image + All.
     """
     if _webview_window is None:
@@ -634,7 +744,7 @@ async def dialog_files(multiple: bool = True, file_types: str = "") -> JSONRespo
     import webview as _wv  # noqa: PLC0415
 
     if file_types:
-        ft = tuple(file_types.split(";"))
+        ft = tuple(file_types.split("|"))
     else:
         ft = (
             "Supported Files (*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp)",
@@ -658,7 +768,7 @@ async def dialog_save(
 ) -> JSONResponse:
     """Open a native save-file dialog (desktop / pywebview mode only).
 
-    *file_types* is a semicolon-separated list of filter strings.
+    *file_types* is a pipe-separated list of filter strings.
     If empty, defaults to PDF + All.
     """
     if _webview_window is None:
@@ -666,7 +776,7 @@ async def dialog_save(
     import webview as _wv  # noqa: PLC0415
 
     if file_types:
-        ft = tuple(file_types.split(";"))
+        ft = tuple(file_types.split("|"))
     else:
         ft = ("PDF Files (*.pdf)", "All Files (*.*)")
 

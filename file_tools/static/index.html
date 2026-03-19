@@ -638,6 +638,9 @@
     <button class="tab-btn" id="tab-pdf2dcm" onclick="switchTab('pdf2dcm', this)">
       <span class="material-icons" style="font-size:16px">medical_information</span>PDF 2 DCM
     </button>
+    <button class="tab-btn" id="tab-image-shrinker" onclick="switchTab('image-shrinker', this)">
+      <span class="material-icons" style="font-size:16px">photo_size_select_large</span>Img Shrink
+    </button>
   </div>
 </nav>
 
@@ -1072,6 +1075,76 @@
         </button>
       </div>
       <div class="result-box" id="dcm-result"></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── IMAGE SHRINKER ───────────────────── -->
+  <section class="tool-panel" id="image-shrinker">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">photo_size_select_large</span> Image Shrinker
+      </div>
+      <p class="card__desc">
+        Add images (JPG, PNG, BMP, TIFF, WebP) and resize them by percentage, max width, or max height.
+      </p>
+
+      <!-- Hidden file input -->
+      <input type="file" id="shrink-files" multiple accept=".jpg,.jpeg,.png,.bmp,.tiff,.tif,.webp" />
+
+      <!-- File manager -->
+      <div class="file-manager">
+        <div class="file-manager__header">
+          <span id="shrink-file-count">0 files</span>
+          <div class="file-manager__actions">
+            <button class="btn btn-outline btn-sm" onclick="shrinkAddFiles()">
+              <span class="material-icons" style="font-size:14px">add</span>Add Files
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="shrinkClearAll()">
+              <span class="material-icons" style="font-size:14px">delete_sweep</span>Clear
+            </button>
+          </div>
+        </div>
+        <ul class="file-manager__list" id="shrink-list">
+          <li class="file-manager__empty" id="shrink-empty">No files added yet. Click "Add Files" to begin.</li>
+        </ul>
+      </div>
+
+      <!-- Resize mode -->
+      <div class="card__title" style="font-size:.9rem;margin-top:var(--sp-sm)">
+        <span class="material-icons" style="font-size:18px">tune</span> Resize Settings
+      </div>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label for="shrink-mode">Mode</label>
+          <select id="shrink-mode" onchange="shrinkModeChanged()">
+            <option value="percent">Scale by %</option>
+            <option value="max-width">Max Width (px)</option>
+            <option value="max-height">Max Height (px)</option>
+          </select>
+        </div>
+        <div class="form-group" id="shrink-percent-group">
+          <label for="shrink-percent">Scale %</label>
+          <input type="number" id="shrink-percent" value="50" min="1" max="100" step="1" />
+        </div>
+        <div class="form-group" id="shrink-maxw-group" style="display:none">
+          <label for="shrink-maxw">Max Width (px)</label>
+          <input type="number" id="shrink-maxw" value="1920" min="1" max="99999" step="1" />
+        </div>
+        <div class="form-group" id="shrink-maxh-group" style="display:none">
+          <label for="shrink-maxh">Max Height (px)</label>
+          <input type="number" id="shrink-maxh" value="1080" min="1" max="99999" step="1" />
+        </div>
+      </div>
+
+      <div class="action-row">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="shrink-replace" /> Replace originals
+        </label>
+        <button class="btn btn-primary" onclick="shrinkRun()">
+          <span class="material-icons" style="font-size:16px">compress</span>Shrink
+        </button>
+      </div>
+      <div class="result-box" id="shrink-result"></div>
     </div>
   </section>
 
@@ -2515,7 +2588,7 @@ async function dcmGenerate() {
     if (isDesktop && typeof _dcmPdfFile === 'string') {
       // Desktop mode: use server-side convert-desktop endpoint with save dialog
       const dlg = await fetch('/api/dialog/save?filename=' + encodeURIComponent(defaultDcmName) +
-        '&file_types=' + encodeURIComponent('DICOM Files (*.dcm);All Files (*.*)'));
+        '&file_types=' + encodeURIComponent('DICOM Files (*.dcm)|All Files (*.*)'));
       if (!dlg.ok) { showResult('dcm-result', 'Save dialog failed.', 'error'); return; }
       const { path } = await dlg.json();
       if (!path) { showResult('dcm-result', 'Save cancelled.', ''); return; }
@@ -2595,6 +2668,156 @@ async function dcmGenerate() {
       });
     }
   };
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*                         IMAGE SHRINKER                             */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+let _shrinkFiles = [];           // { file: File, name, size }
+let _shrinkDesktopFiles = [];    // path strings (desktop mode)
+
+const IMG_EXTS = new Set(['jpg','jpeg','png','bmp','tiff','tif','webp']);
+
+document.getElementById('shrink-files').addEventListener('change', function () {
+  for (const f of this.files) {
+    _shrinkFiles.push({ file: f, name: f.name, size: f.size });
+  }
+  this.value = '';
+  renderShrinkList();
+});
+
+async function shrinkAddFiles() {
+  if (await _detectDesktop()) {
+    try {
+      const r = await fetch('/api/dialog/files?multiple=true&file_types=' + encodeURIComponent('Images (*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp)'));
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.files && d.files.length) {
+        _shrinkDesktopFiles.push(...d.files);
+        renderShrinkList();
+      }
+    } catch (_) { /* ignore */ }
+  } else {
+    document.getElementById('shrink-files').click();
+  }
+}
+
+function renderShrinkList() {
+  const list  = document.getElementById('shrink-list');
+  const count = document.getElementById('shrink-file-count');
+
+  if (_shrinkFiles.length === 0 && _shrinkDesktopFiles.length === 0) {
+    list.innerHTML = '<li class="file-manager__empty" id="shrink-empty">No files added yet. Click "Add Files" to begin.</li>';
+    count.textContent = '0 files';
+    return;
+  }
+
+  if (_shrinkDesktopFiles.length > 0) {
+    count.textContent = _shrinkDesktopFiles.length + ' file(s)';
+    list.innerHTML = _shrinkDesktopFiles.map((p, i) => {
+      const name = p.split(/[\\/]/).pop();
+      return `<li class="file-item">
+        <span class="file-item__index">${i+1}</span>
+        <span class="material-icons file-item__icon img">image</span>
+        <span class="file-item__name" title="${escHtml(p)}">${escHtml(name)}</span>
+        <button class="btn-icon-delete" onclick="shrinkRemove(${i})" title="Remove"><span class="material-icons">delete</span></button>
+      </li>`;
+    }).join('');
+    return;
+  }
+
+  count.textContent = _shrinkFiles.length + ' file(s)';
+  list.innerHTML = _shrinkFiles.map((f, i) => {
+    return `<li class="file-item">
+      <span class="file-item__index">${i + 1}</span>
+      <span class="material-icons file-item__icon img">image</span>
+      <span class="file-item__name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <span class="file-item__size">${fileSize(f.size)}</span>
+      <button class="btn-icon-delete" onclick="shrinkRemove(${i})" title="Remove"><span class="material-icons">delete</span></button>
+    </li>`;
+  }).join('');
+}
+
+function shrinkRemove(index) {
+  if (_shrinkDesktopFiles.length > 0) {
+    _shrinkDesktopFiles.splice(index, 1);
+  } else {
+    _shrinkFiles.splice(index, 1);
+  }
+  renderShrinkList();
+}
+
+function shrinkClearAll() {
+  _shrinkFiles = [];
+  _shrinkDesktopFiles = [];
+  renderShrinkList();
+}
+
+function shrinkModeChanged() {
+  const mode = document.getElementById('shrink-mode').value;
+  document.getElementById('shrink-percent-group').style.display = mode === 'percent' ? '' : 'none';
+  document.getElementById('shrink-maxw-group').style.display    = mode === 'max-width' ? '' : 'none';
+  document.getElementById('shrink-maxh-group').style.display    = mode === 'max-height' ? '' : 'none';
+}
+
+async function shrinkRun() {
+  const mode = document.getElementById('shrink-mode').value;
+  const scalePercent = mode === 'percent'    ? parseInt(document.getElementById('shrink-percent').value, 10) : 0;
+  const maxWidth     = mode === 'max-width'  ? parseInt(document.getElementById('shrink-maxw').value, 10)    : 0;
+  const maxHeight    = mode === 'max-height' ? parseInt(document.getElementById('shrink-maxh').value, 10)    : 0;
+  const replaceOrig  = document.getElementById('shrink-replace').checked;
+
+  if (_shrinkDesktopFiles.length > 0) {
+    /* Desktop mode: shrink by path */
+    const fd = new FormData();
+    fd.append('file_paths', _shrinkDesktopFiles.join('\n'));
+    fd.append('scale_percent', scalePercent);
+    fd.append('max_width', maxWidth);
+    fd.append('max_height', maxHeight);
+    fd.append('replace', replaceOrig);
+
+    showResult('shrink-result', 'Shrinking…', '');
+    try {
+      const r = await fetch('/api/image/shrink-by-path', { method: 'POST', body: fd });
+      if (!r.ok) { showResult('shrink-result', await errorDetail(r), 'error'); return; }
+      const data = await r.json();
+      const verb = replaceOrig ? 'replaced' : 'created';
+      let msg = 'Done — ' + data.count + ' image(s) ' + verb + '.\n';
+      for (const item of data.results) {
+        const name = item.path.split(/[\\/]/).pop();
+        msg += name + ': ' + item.original_size.join('×') + ' → ' + item.new_size.join('×') + '\n';
+      }
+      showResult('shrink-result', msg, 'success');
+    } catch (e) {
+      showResult('shrink-result', 'Failed: ' + e, 'error');
+    }
+  } else if (_shrinkFiles.length > 0) {
+    /* Browser mode: upload, shrink, download ZIP */
+    const fd = new FormData();
+    for (const f of _shrinkFiles) fd.append('files', f.file);
+    fd.append('scale_percent', scalePercent);
+    fd.append('max_width', maxWidth);
+    fd.append('max_height', maxHeight);
+
+    showResult('shrink-result', 'Shrinking…', '');
+    try {
+      const r = await fetch('/api/image/shrink', { method: 'POST', body: fd });
+      if (!r.ok) { showResult('shrink-result', await errorDetail(r), 'error'); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shrunk_images.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+      showResult('shrink-result', 'Downloaded shrunk_images.zip', 'success');
+    } catch (e) {
+      showResult('shrink-result', 'Failed: ' + e, 'error');
+    }
+  } else {
+    showResult('shrink-result', 'Add at least one image file.', 'error');
+  }
 }
 </script>
 </body>

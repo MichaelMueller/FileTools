@@ -1,5 +1,72 @@
 # Agent Log
 
+## 2026-03-18 18:10 – Version bump to 1.3.7 & installer build
+
+### Summary
+Bumped version from 1.3.6 to 1.3.7 in `pyproject.toml`, `installer_builder.py`, and `main.py` (which was stale at 1.3.1). Built installer: `FileTools-1.3.7-Setup.exe` (71.79 MB).
+
+### Changes
+- **`pyproject.toml`** – version → 1.3.7
+- **`file_tools/tools/installer_builder.py`** – `APP_VERSION` → 1.3.7
+- **`file_tools/main.py`** – FastAPI `version` → 1.3.7
+- **`build/FileTools-1.3.7-Setup.exe`** – 71.79 MB
+
+---
+
+## 2026-03-18 18:00 – Fix file_types delimiter (`;` → `|`)
+
+### Summary
+The previous filter fix (spaces inside parens) was still rejected by pywebview's `parse_file_type` regex, which requires semicolons between extensions inside a group: `Images (*.jpg;*.jpeg;*.png;...)`. The root cause was that the backend used `;` as the delimiter between *filter groups*, colliding with the semicolons *inside* each group. Changed the group delimiter to `|` on both backend and JS sides. The pywebview format now uses the correct semicolons inside parens.
+
+### Changes
+- **`file_tools/main.py`** – `dialog_files` and `dialog_save` split `file_types` on `|` instead of `;`.
+- **`file_tools/static/index.html`** – Image Shrinker filter restored to `Images (*.jpg;*.jpeg;…)`. DICOM save dialog uses `|` between groups.
+
+---
+
+## 2026-03-18 17:47 – Image Shrinker bugfixes (file filter + replace toggle)
+
+### Summary
+Fixed two bugs in the Image Shrinker tool:
+1. **File dialog filter error**: pywebview's `parse_file_type` rejected the filter string because semicolons inside parentheses (`*.jpg;*.jpeg;...`) were being split by the backend. Switched to spaces inside the parens (`*.jpg *.jpeg ...`).
+2. **Replace made optional**: Shrunk images are now saved with a `_shrunk` suffix by default instead of overwriting originals. A new "Replace originals" checkbox (off by default) controls the behaviour.
+
+### Changes
+- **`file_tools/tools/image_shrinker.py`** – Added `replace: bool = False` parameter. When `False`, output is written to `<stem>_shrunk.<ext>`.
+- **`file_tools/main.py`** – `POST /api/image/shrink-by-path` accepts `replace` form field (default `False`). Browser upload endpoint always uses `replace=True` (temp files).
+- **`file_tools/static/index.html`** – Fixed filter format (spaces instead of semicolons), added "Replace originals" checkbox, renamed button from "Replace" to "Shrink", renamed JS function to `shrinkRun()`.
+- **`file_tools/tests/test_image_shrinker.py`** – Split `test_shrink_by_percent` into suffix/replace variants; updated png and rgba tests to check `_shrunk` output files. 19 unit tests.
+- **`file_tools/tests/test_main.py`** – Added `_shrunk` path assertion to existing test; added `test_image_shrink_by_path_replace` for `replace=true`. 329 tests total, all passing.
+
+---
+
+## 2026-03-18 – Faster startup (lazy imports + server polling)
+
+### Summary
+Reduced application startup time by ~1.5 s. Module-level tool imports in `main.py` (PIL, pypdf, pydicom, etc.) were deferred to the endpoint functions that actually use them, cutting the import time from ~1.0 s to ~0.55 s. The hardcoded `time.sleep(1)` in `desktop.py` was replaced with a TCP polling loop (`_wait_for_server`) that returns as soon as uvicorn is ready.
+
+### Changes
+- **`file_tools/main.py`** – Moved all tool imports (`merge_pdfs`, `split_pdf`, `DedupScanner`, `DateSorter`, `Pdf2Dcm`, `ImageShrinker`, etc.) from module level into their respective endpoint functions.
+- **`file_tools/desktop.py`** – Added `_wait_for_server(host, port)` that polls via `socket.create_connection` instead of sleeping 1 s. Used by `run_desktop`.
+- **`file_tools/tests/test_main.py`** – Updated 49 `patch()` targets from `file_tools.main.X` to `file_tools.tools.X` to match the new lazy-import locations.
+- **`file_tools/tests/test_desktop.py`** – Replaced `time.sleep` assertion with `_wait_for_server` mock. Added 3 tests for `_wait_for_server` (immediate success, retries, timeout).
+
+---
+
+## 2025-07-11 – New tool: Image Shrinker
+
+### Summary
+Added a new "Image Shrinker" tool that lets users batch-resize images by percentage, max width, or max height, replacing the originals in-place (desktop mode) or downloading a ZIP (browser mode).
+
+### Changes
+- **`file_tools/tools/image_shrinker.py`** (NEW) – `ImageShrinker` class with static `shrink()` method. Supports JPG, PNG, BMP, TIFF, WebP. Handles EXIF transpose, RGBA→RGB for JPEG, format-specific save options.
+- **`file_tools/main.py`** – Added `POST /api/image/shrink-by-path` (desktop) and `POST /api/image/shrink` (browser upload→ZIP) endpoints.
+- **`file_tools/static/index.html`** – Added "Img Shrink" tab, file manager UI, mode selector (percent / max-width / max-height), and JavaScript for both desktop and browser modes.
+- **`file_tools/tests/test_image_shrinker.py`** (NEW) – 18 unit tests covering validation, scale by percent, max width/height, skip-if-small, format handling, RGBA conversion, missing/non-image files, string paths.
+- **`file_tools/tests/test_main.py`** – 8 API endpoint tests for both shrink-by-path and upload shrink routes (success, validation, error cases).
+
+---
+
 ## 2026-03-13 – Dir Compare: fix Browse buttons for browser mode
 
 ### Summary

@@ -44,6 +44,17 @@ def _find_port(host: str, start: int, attempts: int) -> int:
     raise RuntimeError(msg)
 
 
+def _wait_for_server(host: str, port: int, timeout: float = 5.0) -> None:
+    """Block until the server accepts a TCP connection (or *timeout* expires)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.1):
+                return
+        except OSError:
+            time.sleep(0.05)
+
+
 _uvicorn_server: uvicorn.Server | None = None
 
 
@@ -79,8 +90,8 @@ def run_desktop(
 
     thread = threading.Thread(target=_run_server, args=(host, port), daemon=True)
     thread.start()
-    # Give uvicorn a moment to bind the port before opening the window.
-    time.sleep(1)
+    # Wait until the server is actually accepting connections.
+    _wait_for_server(host, port)
 
     _icon_path = str(Path(__file__).parent / "static" / "icon.ico")
     window = webview.create_window(

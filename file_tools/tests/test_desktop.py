@@ -62,7 +62,7 @@ class TestPortHelpers:
 
 
 def test_run_desktop_starts_server_and_webview() -> None:
-    """run_desktop starts a daemon thread, sleeps, creates a window, and calls start."""
+    """run_desktop starts a daemon thread, waits for server, creates a window, and calls start."""
     mock_window = MagicMock()
     # += on a MagicMock replaces the attr with __iadd__'s return value.
     # Make __iadd__ return *self* so the mock stays the same object.
@@ -84,7 +84,7 @@ def test_run_desktop_starts_server_and_webview() -> None:
         patch.dict("sys.modules", {"webview": mock_webview}),
         patch("file_tools.desktop.webview", mock_webview),
         patch("file_tools.desktop.threading.Thread", mock_thread_cls),
-        patch("file_tools.desktop.time.sleep") as mock_sleep,
+        patch("file_tools.desktop._wait_for_server") as mock_wait,
         patch("file_tools.desktop._find_port", return_value=9876),
         patch("os._exit") as mock_exit,
     ):
@@ -99,8 +99,8 @@ def test_run_desktop_starts_server_and_webview() -> None:
             assert call.kwargs.get("daemon") is True
         assert mock_thread.start.call_count == 2
 
-        # Slept for 1 second
-        mock_sleep.assert_called_once_with(1)
+        # _wait_for_server called with host and port
+        mock_wait.assert_called_once_with("127.0.0.1", 9876)
 
         # pywebview window created
         mock_webview.create_window.assert_called_once_with(
@@ -125,6 +125,54 @@ def test_run_desktop_starts_server_and_webview() -> None:
 
         # os._exit(0) called to ensure clean shutdown
         mock_exit.assert_called_once_with(0)
+
+
+def test_wait_for_server_succeeds() -> None:
+    """_wait_for_server returns once the server accepts a connection."""
+    from file_tools.desktop import _wait_for_server
+
+    # Use a real listening socket so create_connection succeeds immediately.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        _wait_for_server("127.0.0.1", port, timeout=1.0)  # should return fast
+
+
+def test_wait_for_server_retries_then_succeeds() -> None:
+    """_wait_for_server keeps retrying until the port opens."""
+    from file_tools.desktop import _wait_for_server
+
+    call_count = 0
+    real_create_conn = socket.create_connection
+
+    def _flaky_connect(addr, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise OSError("not ready")
+        return real_create_conn(addr, **kwargs)
+
+    # Need a real port to connect to on the 3rd try
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        with patch("file_tools.desktop.socket.create_connection", side_effect=_flaky_connect):
+            _wait_for_server("127.0.0.1", port, timeout=5.0)
+        assert call_count >= 3
+
+
+def test_wait_for_server_timeout() -> None:
+    """_wait_for_server exits silently when the timeout expires."""
+    from file_tools.desktop import _wait_for_server
+
+    # Pick a port that nothing is listening on
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    # Port is now unbound and nobody is listening
+    _wait_for_server("127.0.0.1", port, timeout=0.15)  # should return after timeout
 
 
 def test_run_server_uses_uvicorn() -> None:
