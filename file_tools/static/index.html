@@ -603,6 +603,63 @@
       .app-bar__inner { padding: 0 var(--sp-md); }
       main { padding: var(--sp-md); }
     }
+    /* ── Duplex Scan – two-slot file picker ─────────────────────────── */
+    .duplex-slot {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      padding: var(--sp-md);
+      margin-bottom: var(--sp-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-sm);
+    }
+    .duplex-slot__header {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-sm);
+      font-weight: 600;
+    }
+    .duplex-slot__hint {
+      font-size: .8rem;
+      color: var(--clr-muted);
+      margin-left: 2px;
+    }
+    .duplex-slot__file-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-sm);
+    }
+    .duplex-slot__filename {
+      flex: 1;
+      color: var(--clr-muted);
+      font-size: .9rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-style: italic;
+    }
+    .duplex-slot__filename.selected {
+      color: var(--clr-on-surface);
+      font-style: normal;
+    }
+    .duplex-flow {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-outline);
+      border-radius: var(--radius);
+      padding: var(--sp-sm) var(--sp-md);
+      margin-bottom: var(--sp-md);
+      font-size: .82rem;
+      color: var(--clr-muted);
+      line-height: 1.8;
+    }
+    .duplex-flow code {
+      background: var(--clr-surface);
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: var(--clr-primary);
+      font-size: .8rem;
+    }
   </style>
 </head>
 <body>
@@ -640,6 +697,9 @@
     </button>
     <button class="tab-btn" id="tab-image-shrinker" onclick="switchTab('image-shrinker', this)">
       <span class="material-icons" style="font-size:16px">photo_size_select_large</span>Img Shrink
+    </button>
+    <button class="tab-btn" id="tab-duplex-scan" onclick="switchTab('duplex-scan', this)">
+      <span class="material-icons" style="font-size:16px">flip</span>Duplex Scan
     </button>
   </div>
 </nav>
@@ -1145,6 +1205,65 @@
         </button>
       </div>
       <div class="result-box" id="shrink-result"></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── DUPLEX SCAN ─────────────────────────── -->
+  <section class="tool-panel" id="duplex-scan">
+    <div class="card">
+      <div class="card__title">
+        <span class="material-icons">flip</span> Duplex Scan Simulator
+      </div>
+      <p class="card__desc">
+        Kombiniert zwei PDF-Scans zu einem korrekt geordneten doppelseitigen Dokument.
+      </p>
+
+      <div class="duplex-flow">
+        <strong>Workflow:</strong><br>
+        1. Vorderseiten scannen &rarr; als <code>PDF 1</code> speichern<br>
+        2. Stapel umdrehen (letzte Seite liegt oben) &rarr; R&uuml;ckseiten scannen &rarr; als <code>PDF 2</code> speichern<br>
+        3. Dieses Tool f&uuml;gt beide zusammen: <code>V1, R1, V2, R2, &hellip; VN, RN</code>
+      </div>
+
+      <!-- Slot 1: Front sides -->
+      <div class="duplex-slot">
+        <div class="duplex-slot__header">
+          <span class="material-icons" style="color:var(--clr-primary);font-size:20px">looks_one</span>
+          PDF 1 &ndash; Vorderseiten
+          <span class="duplex-slot__hint">(in Lesereihenfolge gescannt)</span>
+        </div>
+        <div class="duplex-slot__file-row">
+          <span class="duplex-slot__filename" id="duplex-front-name">Keine Datei gew&auml;hlt</span>
+          <button class="btn btn-outline btn-sm" onclick="duplexPickFile('front')">
+            <span class="material-icons" style="font-size:14px">folder_open</span>Ausw&auml;hlen
+          </button>
+        </div>
+        <input type="file" id="duplex-front-input" accept=".pdf" onchange="duplexFileChosen('front', this)" />
+      </div>
+
+      <!-- Slot 2: Back sides -->
+      <div class="duplex-slot">
+        <div class="duplex-slot__header">
+          <span class="material-icons" style="color:var(--clr-secondary);font-size:20px">looks_two</span>
+          PDF 2 &ndash; R&uuml;ckseiten
+          <span class="duplex-slot__hint">(Stapel umgedreht, letzte Seite zuerst)</span>
+        </div>
+        <div class="duplex-slot__file-row">
+          <span class="duplex-slot__filename" id="duplex-back-name">Keine Datei gew&auml;hlt</span>
+          <button class="btn btn-outline btn-sm" onclick="duplexPickFile('back')">
+            <span class="material-icons" style="font-size:14px">folder_open</span>Ausw&auml;hlen
+          </button>
+        </div>
+        <input type="file" id="duplex-back-input" accept=".pdf" onchange="duplexFileChosen('back', this)" />
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="duplexMerge()">
+          <span class="material-icons" style="font-size:16px">flip</span>Zusammenf&uuml;hren
+        </button>
+        <div class="spinner" id="duplex-spinner"></div>
+      </div>
+      <div class="result-box" id="duplex-result"></div>
     </div>
   </section>
 
@@ -2759,6 +2878,87 @@ function shrinkModeChanged() {
   document.getElementById('shrink-percent-group').style.display = mode === 'percent' ? '' : 'none';
   document.getElementById('shrink-maxw-group').style.display    = mode === 'max-width' ? '' : 'none';
   document.getElementById('shrink-maxh-group').style.display    = mode === 'max-height' ? '' : 'none';
+}
+
+/* ── Duplex Scan ─────────────────────────────────────────────────── */
+
+let _duplexFront = null;  // {type:'path',path:string} | {type:'file',file:File} | null
+let _duplexBack  = null;
+
+async function duplexPickFile(role) {
+  const modeR = await fetch('/api/mode');
+  const { desktop } = await modeR.json();
+  if (desktop) {
+    const r = await fetch('/api/dialog/files?multiple=false&file_types=PDF Files (*.pdf)');
+    const { files } = await r.json();
+    if (!files || !files.length) return;
+    const val = { type: 'path', path: files[0] };
+    if (role === 'front') _duplexFront = val; else _duplexBack = val;
+    duplexSetName(role, files[0].split(/[\\/]/).pop());
+  } else {
+    document.getElementById('duplex-' + role + '-input').click();
+  }
+}
+
+function duplexFileChosen(role, input) {
+  if (!input.files.length) return;
+  const f = input.files[0];
+  const val = { type: 'file', file: f };
+  if (role === 'front') _duplexFront = val; else _duplexBack = val;
+  duplexSetName(role, f.name);
+}
+
+function duplexSetName(role, name) {
+  const el = document.getElementById('duplex-' + role + '-name');
+  el.textContent = name;
+  el.classList.add('selected');
+}
+
+async function duplexMerge() {
+  if (!_duplexFront || !_duplexBack) {
+    showResult('duplex-result', 'Bitte beide PDF-Dateien auswählen.', 'error');
+    return;
+  }
+  if (_duplexFront.type !== _duplexBack.type) {
+    showResult('duplex-result', 'Bitte beide Dateien auf die gleiche Weise auswählen (Dialog oder Upload).', 'error');
+    return;
+  }
+
+  document.getElementById('duplex-spinner').classList.add('show');
+  showResult('duplex-result', 'Zusammenführen…', '');
+
+  try {
+    if (_duplexFront.type === 'path') {
+      const saveR = await fetch('/api/dialog/save?filename=duplex_merged.pdf&file_types=PDF Files (*.pdf)');
+      const { path: outPath } = await saveR.json();
+      if (!outPath) { showResult('duplex-result', 'Abgebrochen.', ''); return; }
+
+      const fd = new FormData();
+      fd.append('front_path',  _duplexFront.path);
+      fd.append('back_path',   _duplexBack.path);
+      fd.append('output_path', outPath);
+      const r = await fetch('/api/pdf/duplex-merge-by-path', { method: 'POST', body: fd });
+      if (!r.ok) { showResult('duplex-result', await errorDetail(r), 'error'); return; }
+      const { saved } = await r.json();
+      showResult('duplex-result', 'Gespeichert: ' + saved, 'success');
+    } else {
+      const fd = new FormData();
+      fd.append('front', _duplexFront.file);
+      fd.append('back',  _duplexBack.file);
+      const r = await fetch('/api/pdf/duplex-merge', { method: 'POST', body: fd });
+      if (!r.ok) { showResult('duplex-result', await errorDetail(r), 'error'); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'duplex_merged.pdf'; a.click();
+      URL.revokeObjectURL(url);
+      showResult('duplex-result', 'Heruntergeladen: duplex_merged.pdf', 'success');
+    }
+  } catch (e) {
+    showResult('duplex-result', 'Fehler: ' + e, 'error');
+  } finally {
+    document.getElementById('duplex-spinner').classList.remove('show');
+  }
 }
 
 async function shrinkRun() {

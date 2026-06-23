@@ -1438,6 +1438,110 @@ def test_dialog_directory_with_default_dir(client: TestClient, tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
+# Duplex Scan endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_duplex_merge_upload(client: TestClient) -> None:
+    front = _make_pdf_bytes(3)
+    back = _make_pdf_bytes(3)
+    r = client.post(
+        "/api/pdf/duplex-merge",
+        files=[
+            ("front", ("front.pdf", front, "application/pdf")),
+            ("back",  ("back.pdf",  back,  "application/pdf")),
+        ],
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"
+    from pypdf import PdfReader
+    pages = len(PdfReader(io.BytesIO(r.content)).pages)
+    assert pages == 6
+
+
+def test_duplex_merge_upload_odd_pages(client: TestClient) -> None:
+    """3 front + 2 back → 5 pages."""
+    r = client.post(
+        "/api/pdf/duplex-merge",
+        files=[
+            ("front", ("f.pdf", _make_pdf_bytes(3), "application/pdf")),
+            ("back",  ("b.pdf", _make_pdf_bytes(2), "application/pdf")),
+        ],
+    )
+    assert r.status_code == 200
+    from pypdf import PdfReader
+    assert len(PdfReader(io.BytesIO(r.content)).pages) == 5
+
+
+def test_duplex_merge_upload_empty_front(client: TestClient) -> None:
+    r = client.post(
+        "/api/pdf/duplex-merge",
+        files=[
+            ("front", ("f.pdf", b"", "application/pdf")),
+            ("back",  ("b.pdf", _make_pdf_bytes(1), "application/pdf")),
+        ],
+    )
+    assert r.status_code == 422
+
+
+def test_duplex_merge_by_path(client: TestClient, tmp_path: Path) -> None:
+    front_p = tmp_path / "front.pdf"
+    back_p  = tmp_path / "back.pdf"
+    out_p   = tmp_path / "merged.pdf"
+    front_p.write_bytes(_make_pdf_bytes(2))
+    back_p.write_bytes(_make_pdf_bytes(2))
+    r = client.post(
+        "/api/pdf/duplex-merge-by-path",
+        data={
+            "front_path": str(front_p),
+            "back_path":  str(back_p),
+            "output_path": str(out_p),
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["saved"] == str(out_p)
+    assert out_p.is_file()
+    from pypdf import PdfReader
+    assert len(PdfReader(str(out_p)).pages) == 4
+
+
+def test_duplex_merge_by_path_default_output(client: TestClient, tmp_path: Path) -> None:
+    front_p = tmp_path / "scan.pdf"
+    back_p  = tmp_path / "back.pdf"
+    front_p.write_bytes(_make_pdf_bytes(1))
+    back_p.write_bytes(_make_pdf_bytes(1))
+    r = client.post(
+        "/api/pdf/duplex-merge-by-path",
+        data={"front_path": str(front_p), "back_path": str(back_p)},
+    )
+    assert r.status_code == 200
+    saved = Path(r.json()["saved"])
+    assert saved.name == "scan_duplex.pdf"
+    assert saved.is_file()
+
+
+def test_duplex_merge_by_path_front_not_found(client: TestClient, tmp_path: Path) -> None:
+    back_p = tmp_path / "back.pdf"
+    back_p.write_bytes(_make_pdf_bytes(1))
+    r = client.post(
+        "/api/pdf/duplex-merge-by-path",
+        data={"front_path": str(tmp_path / "missing.pdf"), "back_path": str(back_p)},
+    )
+    assert r.status_code == 404
+
+
+def test_duplex_merge_by_path_back_not_found(client: TestClient, tmp_path: Path) -> None:
+    front_p = tmp_path / "front.pdf"
+    front_p.write_bytes(_make_pdf_bytes(1))
+    r = client.post(
+        "/api/pdf/duplex-merge-by-path",
+        data={"front_path": str(front_p), "back_path": str(tmp_path / "missing.pdf")},
+    )
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Image Shrinker endpoints
 # ---------------------------------------------------------------------------
 

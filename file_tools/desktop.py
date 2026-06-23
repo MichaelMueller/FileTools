@@ -232,6 +232,8 @@ def run_desktop(
         # Ensure process exit to avoid leaving background threads running
         import os  # noqa: PLC0415
         os._exit(1)
+    except BaseException:  # pragma: no cover - pywebview raises SystemExit / .NET thread exceptions on normal close
+        pass  # fall through to os._exit(0) below
 
     # Ensure the uvicorn server shuts down when the window closes.
     if _uvicorn_server is not None:  # pragma: no cover

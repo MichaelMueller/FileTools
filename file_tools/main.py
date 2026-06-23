@@ -644,6 +644,75 @@ async def pdf2dcm_convert_desktop(body: dict) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# Duplex Scan Simulator
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/pdf/duplex-merge")
+async def pdf_duplex_merge(
+    front: Annotated[UploadFile, File()],
+    back: Annotated[UploadFile, File()],
+) -> Response:
+    """Merge front and back PDF scans into a duplex document (browser upload).
+
+    *front*: PDF with front sides in reading order.
+    *back*:  PDF with back sides scanned after flipping the stack (last sheet first).
+    """
+    from file_tools.tools.duplex_scan import merge_duplex  # noqa: PLC0415
+
+    front_bytes = await front.read()
+    back_bytes = await back.read()
+
+    if not front_bytes:
+        raise HTTPException(status_code=422, detail="Front PDF is empty.")
+    if not back_bytes:
+        raise HTTPException(status_code=422, detail="Back PDF is empty.")
+
+    try:
+        merged = merge_duplex(front_bytes, back_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
+
+    return Response(
+        content=merged,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=duplex_merged.pdf"},
+    )
+
+
+@app.post("/api/pdf/duplex-merge-by-path")
+async def pdf_duplex_merge_by_path(
+    front_path: Annotated[str, Form()],
+    back_path: Annotated[str, Form()],
+    output_path: Annotated[str, Form()] = "",
+) -> JSONResponse:
+    """Merge front and back PDF scans by filesystem path (desktop mode).
+
+    If *output_path* is empty the result is saved next to *front_path* with a
+    ``_duplex`` suffix.
+    """
+    from file_tools.tools.duplex_scan import merge_duplex  # noqa: PLC0415
+
+    front = Path(front_path.strip())
+    back = Path(back_path.strip())
+
+    if not front.is_file():
+        raise HTTPException(status_code=404, detail=f"Front PDF not found: {front_path}")
+    if not back.is_file():
+        raise HTTPException(status_code=404, detail=f"Back PDF not found: {back_path}")
+
+    try:
+        merged = merge_duplex(front.read_bytes(), back.read_bytes())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Merge failed: {exc}") from exc
+
+    dest = Path(output_path.strip()) if output_path.strip() else front.with_stem(front.stem + "_duplex")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(merged)
+    return JSONResponse(content={"saved": str(dest)})
+
+
+# ---------------------------------------------------------------------------
 # Image Shrinker
 # ---------------------------------------------------------------------------
 

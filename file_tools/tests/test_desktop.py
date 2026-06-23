@@ -127,6 +127,37 @@ def test_run_desktop_starts_server_and_webview() -> None:
         mock_exit.assert_called_once_with(0)
 
 
+def test_run_desktop_swallows_base_exception_on_close() -> None:
+    """webview.start() raising BaseException (e.g. SystemExit) on normal close must not propagate."""
+    mock_window = MagicMock()
+    mock_loaded_event = MagicMock()
+    mock_loaded_event.__iadd__ = MagicMock(return_value=mock_loaded_event)
+    mock_events = MagicMock()
+    mock_events.loaded = mock_loaded_event
+    mock_window.events = mock_events
+    mock_webview = MagicMock()
+    mock_webview.create_window.return_value = mock_window
+    mock_webview.start.side_effect = SystemExit(0)
+
+    mock_thread = MagicMock()
+    mock_thread_cls = MagicMock(return_value=mock_thread)
+
+    with (
+        patch.dict("sys.modules", {"webview": mock_webview}),
+        patch("file_tools.desktop.webview", mock_webview),
+        patch("file_tools.desktop.threading.Thread", mock_thread_cls),
+        patch("file_tools.desktop._wait_for_server"),
+        patch("file_tools.desktop._find_port", return_value=9876),
+        patch("os._exit") as mock_exit,
+    ):
+        from file_tools.desktop import run_desktop
+
+        run_desktop(host="127.0.0.1", port=9876)
+
+        # SystemExit was swallowed; os._exit(0) still called
+        mock_exit.assert_called_once_with(0)
+
+
 def test_wait_for_server_succeeds() -> None:
     """_wait_for_server returns once the server accepts a connection."""
     from file_tools.desktop import _wait_for_server
