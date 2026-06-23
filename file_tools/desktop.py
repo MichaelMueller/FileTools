@@ -45,7 +45,10 @@ def _find_port(host: str, start: int, attempts: int) -> int:
 
 
 def _wait_for_server(host: str, port: int, timeout: float = 5.0) -> None:
-    """Block until the server accepts a TCP connection (or *timeout* expires)."""
+    """Block until the server accepts a TCP connection.
+
+    Raises ``RuntimeError`` if the server does not respond within *timeout* seconds.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -53,6 +56,9 @@ def _wait_for_server(host: str, port: int, timeout: float = 5.0) -> None:
                 return
         except OSError:
             time.sleep(0.05)
+    raise RuntimeError(
+        f"Server on {host}:{port} did not accept connections within {timeout:.1f} s."
+    )
 
 
 _uvicorn_server: uvicorn.Server | None = None
@@ -91,7 +97,13 @@ def run_desktop(
     thread = threading.Thread(target=_run_server, args=(host, port), daemon=True)
     thread.start()
     # Wait until the server is actually accepting connections.
-    _wait_for_server(host, port)
+    try:
+        _wait_for_server(host, port)
+    except RuntimeError as exc:
+        if sys.platform == "win32":
+            import ctypes  # noqa: PLC0415
+            ctypes.windll.user32.MessageBoxW(0, str(exc), "FileTools – Startup Error", 0x10)
+        raise
 
     _icon_path = str(Path(__file__).parent / "static" / "icon.ico")
     window = webview.create_window(

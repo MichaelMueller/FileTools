@@ -164,7 +164,7 @@ def test_wait_for_server_retries_then_succeeds() -> None:
 
 
 def test_wait_for_server_timeout() -> None:
-    """_wait_for_server exits silently when the timeout expires."""
+    """_wait_for_server raises RuntimeError when the timeout expires."""
     from file_tools.desktop import _wait_for_server
 
     # Pick a port that nothing is listening on
@@ -172,7 +172,8 @@ def test_wait_for_server_timeout() -> None:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     # Port is now unbound and nobody is listening
-    _wait_for_server("127.0.0.1", port, timeout=0.15)  # should return after timeout
+    with pytest.raises(RuntimeError, match="did not accept connections"):
+        _wait_for_server("127.0.0.1", port, timeout=0.15)
 
 
 def test_run_server_uses_uvicorn() -> None:

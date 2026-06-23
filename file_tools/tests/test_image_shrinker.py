@@ -53,6 +53,21 @@ def test_raises_when_all_options_set() -> None:
         ImageShrinker.shrink([], scale_percent=50, max_width=100, max_height=100)
 
 
+def test_raises_when_scale_percent_exceeds_100() -> None:
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        ImageShrinker.shrink([], scale_percent=150)
+
+
+def test_skip_when_scale_percent_is_100(tmp_path: Path) -> None:
+    p = _make_image(tmp_path / "photo.jpg", 1000, 800)
+    results = ImageShrinker.shrink([p], scale_percent=100)
+    assert results == []
+    # Original must be untouched
+    img = Image.open(p)
+    assert img.size == (1000, 800)
+    img.close()
+
+
 # ---------------------------------------------------------------------------
 # Scale by percentage
 # ---------------------------------------------------------------------------

@@ -17,6 +17,13 @@ from fastapi.staticfiles import StaticFiles
 # Tool imports are deferred to the endpoint functions that need them to
 # keep application startup fast (avoids loading PIL, pypdf, pydicom, … eagerly).
 
+# File types the /api/file/open endpoint is permitted to open with the OS shell.
+_SAFE_OPEN_EXTENSIONS = frozenset({
+    ".pdf", ".dcm",
+    ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp",
+    ".zip",
+})
+
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
@@ -237,7 +244,10 @@ async def pdf_split_to_folder(body: dict) -> JSONResponse:
 
     from pypdf import PdfReader as _Reader  # noqa: PLC0415
 
-    total_pages = len(_Reader(str(file_path)).pages)
+    try:
+        total_pages = len(_Reader(str(file_path)).pages)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Cannot read PDF: {exc}") from exc
     if ranges_str:
         page_ranges = parse_page_ranges(ranges_str, total_pages)
     else:
@@ -368,7 +378,7 @@ async def dedup_scan(body: dict) -> StreamingResponse:
 
     async def _event_stream():
         queue: asyncio.Queue = asyncio.Queue()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _progress(files: int, dirs: int) -> None:
             loop.call_soon_threadsafe(
@@ -545,13 +555,12 @@ async def pdf2dcm_convert(
     ``tags_json`` is a JSON-encoded dict of keyword→value pairs.
     ``template`` is an optional DICOM file used as a dataset template.
     """
-    import json as _json  # noqa: PLC0415
     import tempfile as _tf  # noqa: PLC0415
 
     # Parse tags
     try:
-        tags: dict[str, str] = _json.loads(tags_json) if tags_json else {}
-    except _json.JSONDecodeError as exc:
+        tags: dict[str, str] = json.loads(tags_json) if tags_json else {}
+    except json.JSONDecodeError as exc:
         raise HTTPException(status_code=422, detail=f"Invalid tags JSON: {exc}") from exc
 
     # Save PDF to temp file
@@ -689,7 +698,7 @@ async def image_shrink(
                 tmp_paths.append(Path(tmp.name))
 
         try:
-            ImageShrinker.shrink(
+            shrink_results = ImageShrinker.shrink(
                 tmp_paths,
                 scale_percent=scale_percent,
                 max_width=max_width,
@@ -701,10 +710,12 @@ async def image_shrink(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Shrink failed: {exc}") from exc
 
+        processed = {r["path"] for r in shrink_results}
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for orig_upload, tmp_p in zip(files, tmp_paths):
-                zf.writestr(orig_upload.filename or tmp_p.name, tmp_p.read_bytes())
+                if str(tmp_p) in processed:
+                    zf.writestr(orig_upload.filename or tmp_p.name, tmp_p.read_bytes())
         buf.seek(0)
         return Response(
             content=buf.getvalue(),
@@ -813,6 +824,11 @@ async def file_open(body: dict) -> JSONResponse:
     fpath = Path(path)
     if not fpath.exists():
         raise HTTPException(status_code=404, detail=f"Path not found: {path}")
+    if fpath.is_file() and fpath.suffix.lower() not in _SAFE_OPEN_EXTENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"File type not supported: {fpath.suffix or '(no extension)'}",
+        )
 
     if sys.platform == "win32":
         os.startfile(str(fpath))  # noqa: S606

@@ -1326,12 +1326,20 @@ def test_pdf2dcm_convert_generic_error(client: TestClient, tmp_path: Path) -> No
 
 
 def test_file_open_success(client: TestClient, tmp_path: Path) -> None:
-    f = tmp_path / "test.txt"
-    f.write_text("hi")
+    f = tmp_path / "test.pdf"
+    f.write_bytes(b"%PDF-1.4 placeholder")
     with patch("os.startfile", create=True):
         r = client.post("/api/file/open", json={"path": str(f)})
     assert r.status_code == 200
     assert r.json()["opened"] == str(f)
+
+
+def test_file_open_blocked_extension(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "malicious.exe"
+    f.write_bytes(b"MZ")
+    r = client.post("/api/file/open", json={"path": str(f)})
+    assert r.status_code == 422
+    assert "not supported" in r.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

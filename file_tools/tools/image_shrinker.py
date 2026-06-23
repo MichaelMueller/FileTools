@@ -37,6 +37,8 @@ class ImageShrinker:
         if sum(1 for v in (scale_percent, max_width, max_height) if v > 0) != 1:
             msg = "Exactly one of scale_percent, max_width, or max_height must be set."
             raise ValueError(msg)
+        if scale_percent > 100:
+            raise ValueError("scale_percent must be between 1 and 100.")
 
         results: list[dict] = []
         for p in paths:
@@ -47,10 +49,17 @@ class ImageShrinker:
                 continue
 
             img = Image.open(p)
-            img = ImageOps.exif_transpose(img)
+            try:
+                img = ImageOps.exif_transpose(img)
+            except Exception:
+                img.close()
+                raise
             orig_w, orig_h = img.size
 
             if scale_percent > 0:
+                if scale_percent == 100:
+                    img.close()
+                    continue
                 new_w = max(1, int(orig_w * scale_percent / 100))
                 new_h = max(1, int(orig_h * scale_percent / 100))
             elif max_width > 0:
