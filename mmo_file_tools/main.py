@@ -1,4 +1,4 @@
-"""FastAPI application for FileTools."""
+"""FastAPI application for MMO FileTools."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _SAFE_OPEN_EXTENSIONS = frozenset({
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="FileTools", version="1.3.7")
+app = FastAPI(title="MMO FileTools", version="1.4.0")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -59,7 +59,7 @@ async def pdf_merge(
     margin_mm: Annotated[float, Form()] = 0.0,
 ) -> Response:
     """Merge uploaded PDF/image files into one PDF and return the result."""
-    from file_tools.tools.pdf_tools import merge_pdfs  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf_tools import merge_pdfs  # noqa: PLC0415
 
     if len(files) < 1:  # pragma: no cover – FastAPI validates before this
         raise HTTPException(status_code=422, detail="At least one file is required.")
@@ -106,7 +106,7 @@ async def pdf_merge_by_path(
     margin_mm: Annotated[float, Form()] = 0.0,
 ) -> Response:
     """Merge PDF/image files by filesystem path (desktop mode)."""
-    from file_tools.tools.pdf_tools import merge_pdfs  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf_tools import merge_pdfs  # noqa: PLC0415
 
     paths = [Path(p.strip()) for p in file_paths.strip().split("\n") if p.strip()]
     if len(paths) < 1:
@@ -146,7 +146,7 @@ async def pdf_split(
     If *ranges* is empty every page becomes its own file.
     *output_type* can be ``pdf`` or ``jpeg``.
     """
-    from file_tools.tools.pdf_tools import (  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf_tools import (  # noqa: PLC0415
         parse_page_ranges, split_pdf, split_pdf_to_images,
     )
 
@@ -233,7 +233,7 @@ async def pdf_split_to_folder(body: dict) -> JSONResponse:
     dpi: int = int(body.get("dpi", 150))
     confirmed: bool = bool(body.get("confirmed", False))
 
-    from file_tools.tools.pdf_tools import (  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf_tools import (  # noqa: PLC0415
         parse_page_ranges, split_pdf, split_pdf_to_images,
     )
 
@@ -300,7 +300,7 @@ async def dir_compare(
     target: Annotated[str, Form()],
 ) -> JSONResponse:
     """Compare *source* and *target* directories and return the diff."""
-    from file_tools.tools.dir_compare import compare_directories  # noqa: PLC0415
+    from mmo_file_tools.tools.dir_compare import compare_directories  # noqa: PLC0415
 
     src = Path(source)
     tgt = Path(target)
@@ -327,7 +327,7 @@ async def dir_sync(
 
     Optionally restrict to a newline-separated list of relative paths in *files*.
     """
-    from file_tools.tools.dir_compare import sync_directories  # noqa: PLC0415
+    from mmo_file_tools.tools.dir_compare import sync_directories  # noqa: PLC0415
 
     src = Path(source)
     tgt = Path(target)
@@ -372,7 +372,7 @@ async def dedup_scan(body: dict) -> StreamingResponse:
     if not root.is_dir():
         raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
 
-    from file_tools.tools.dedup_scanner import DedupScanner  # noqa: PLC0415
+    from mmo_file_tools.tools.dedup_scanner import DedupScanner  # noqa: PLC0415
 
     scanner = DedupScanner(db_url=_dedup_db_url)
 
@@ -432,7 +432,7 @@ async def dedup_delete(body: dict) -> JSONResponse:
     if not is_dir and not target.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {path_str}")
 
-    from file_tools.tools.dedup_scanner import DedupScanner  # noqa: PLC0415
+    from mmo_file_tools.tools.dedup_scanner import DedupScanner  # noqa: PLC0415
 
     try:
         DedupScanner.delete_path(target)
@@ -458,7 +458,7 @@ async def date_sort_preview(body: dict) -> JSONResponse:
     if not root.is_dir():
         raise HTTPException(status_code=422, detail=f"Not a directory: {directory}")
 
-    from file_tools.tools.date_sorter import DateSorter  # noqa: PLC0415
+    from mmo_file_tools.tools.date_sorter import DateSorter  # noqa: PLC0415
 
     sorter = DateSorter()
     try:
@@ -480,7 +480,7 @@ async def date_sort_execute(body: dict) -> JSONResponse:
     if not plan:
         raise HTTPException(status_code=422, detail="Empty plan – nothing to move.")
 
-    from file_tools.tools.date_sorter import DateSorter  # noqa: PLC0415
+    from mmo_file_tools.tools.date_sorter import DateSorter  # noqa: PLC0415
 
     sorter = DateSorter()
     try:
@@ -503,7 +503,7 @@ _pdf2dcm_db_url: str | None = None  # let Pdf2Dcm use its default
 @app.get("/api/pdf2dcm/tags")
 async def pdf2dcm_tags() -> JSONResponse:
     """Return the list of common DICOM tags for the frontend dropdown."""
-    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
 
     return JSONResponse(content={"tags": Pdf2Dcm.common_tags()})
 
@@ -511,7 +511,7 @@ async def pdf2dcm_tags() -> JSONResponse:
 @app.get("/api/pdf2dcm/configs")
 async def pdf2dcm_configs() -> JSONResponse:
     """Return all saved tag configurations."""
-    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
 
     p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
     return JSONResponse(content={"configs": p.get_configs()})
@@ -527,7 +527,7 @@ async def pdf2dcm_save_config(body: dict) -> JSONResponse:
     if not name:
         raise HTTPException(status_code=422, detail="name is required.")
     tags = body.get("tags") or {}
-    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
 
     p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
     cfg = p.save_config(name, tags)
@@ -537,7 +537,7 @@ async def pdf2dcm_save_config(body: dict) -> JSONResponse:
 @app.delete("/api/pdf2dcm/configs/{config_id}")
 async def pdf2dcm_delete_config(config_id: int) -> JSONResponse:
     """Delete a tag configuration by ID."""
-    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
 
     p = Pdf2Dcm(db_url=_pdf2dcm_db_url)
     if not p.delete_config(config_id):
@@ -583,7 +583,7 @@ async def pdf2dcm_convert(
                 tmp_tmpl.write(tmpl_data)
                 tmp_tmpl_path = Path(tmp_tmpl.name)
 
-    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
 
     try:
         dcm_bytes = Pdf2Dcm.convert(
@@ -624,7 +624,7 @@ async def pdf2dcm_convert_desktop(body: dict) -> JSONResponse:
     if not output_path:
         raise HTTPException(status_code=422, detail="output_path is required.")
 
-    from file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
+    from mmo_file_tools.tools.pdf2dcm import Pdf2Dcm  # noqa: PLC0415
 
     try:
         dcm_bytes = Pdf2Dcm.convert(
@@ -658,7 +658,7 @@ async def pdf_duplex_merge(
     *front*: PDF with front sides in reading order.
     *back*:  PDF with back sides scanned after flipping the stack (last sheet first).
     """
-    from file_tools.tools.duplex_scan import merge_duplex  # noqa: PLC0415
+    from mmo_file_tools.tools.duplex_scan import merge_duplex  # noqa: PLC0415
 
     front_bytes = await front.read()
     back_bytes = await back.read()
@@ -691,7 +691,7 @@ async def pdf_duplex_merge_by_path(
     If *output_path* is empty the result is saved next to *front_path* with a
     ``_duplex`` suffix.
     """
-    from file_tools.tools.duplex_scan import merge_duplex  # noqa: PLC0415
+    from mmo_file_tools.tools.duplex_scan import merge_duplex  # noqa: PLC0415
 
     front = Path(front_path.strip())
     back = Path(back_path.strip())
@@ -726,7 +726,7 @@ async def image_shrink_by_path(
     replace: Annotated[bool, Form()] = False,
 ) -> JSONResponse:
     """Shrink images by filesystem path (desktop mode)."""
-    from file_tools.tools.image_shrinker import ImageShrinker  # noqa: PLC0415
+    from mmo_file_tools.tools.image_shrinker import ImageShrinker  # noqa: PLC0415
 
     paths = [Path(p.strip()) for p in file_paths.strip().split("\n") if p.strip()]
     if not paths:
@@ -755,7 +755,7 @@ async def image_shrink(
 ) -> Response:
     """Shrink uploaded images, return a zip of the resized files."""
     import tempfile
-    from file_tools.tools.image_shrinker import ImageShrinker  # noqa: PLC0415
+    from mmo_file_tools.tools.image_shrinker import ImageShrinker  # noqa: PLC0415
 
     tmp_paths: list[Path] = []
     try:

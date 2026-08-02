@@ -11,7 +11,7 @@ from pydicom import Dataset, dcmread
 from pydicom.dataset import FileMetaDataset
 from pydicom.uid import UID
 
-from file_tools.tools.pdf2dcm import DcmTagConfigRow, Pdf2Dcm
+from mmo_file_tools.tools.pdf2dcm import DcmTagConfigRow, Pdf2Dcm
 
 
 # ---------------------------------------------------------------------------
@@ -366,10 +366,10 @@ class TestDefaultDbUrl:
 
     def test_init_default_db(self, tmp_path: Path) -> None:
         """When db_url is None, uses user_data_dir to create the DB."""
-        fake_dir = tmp_path / "appdata" / "FileTools"
-        with patch("file_tools.tools.pdf2dcm.user_data_dir", return_value=str(fake_dir)):
+        fake_dir = tmp_path / "appdata" / "MMO FileTools"
+        with patch("mmo_file_tools.tools.pdf2dcm.user_data_dir", return_value=str(fake_dir)):
             p = Pdf2Dcm()
-        assert (fake_dir / "filetools_pdf2dcm.db").exists()
+        assert (fake_dir / "mmo_file_tools_pdf2dcm.db").exists()
 
 
 # ---------------------------------------------------------------------------

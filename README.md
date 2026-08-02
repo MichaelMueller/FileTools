@@ -1,4 +1,4 @@
-# FileTools
+# MMO FileTools
 
 A local-first desktop application for everyday file operations — PDF merging & splitting, directory comparison & sync, duplicate file detection, and date-based photo sorting. Built with **FastAPI**, **pywebview**, and a dark-themed single-page HTML frontend. All processing happens entirely on your machine; no data ever leaves your device.
 
@@ -48,8 +48,8 @@ Sort files (especially photos) into `YYYY/MM_Mon` subdirectories based on their 
 
 ```bash
 # Clone the repository
-git clone https://github.com/MichaelMueller/FileTools.git
-cd FileTools
+git clone https://github.com/MichaelMueller/mmo_file_tools.git
+cd mmo_file_tools
 
 # Create a virtual environment
 python -m venv .venv
@@ -70,13 +70,13 @@ pip install -e ".[dev]"
 
 ```bash
 # Desktop mode (default) — opens a native window
-python file_tools.py
+python mmo_file_tools.py
 
 # Web mode — opens a plain HTTP server on port 8000
-python file_tools.py --web
+python mmo_file_tools.py --web
 
 # Build a Windows NSIS installer
-python file_tools.py installer
+python mmo_file_tools.py installer
 ```
 
 ---
@@ -113,10 +113,10 @@ python file_tools.py installer
 ### Project Structure
 
 ```
-FileTools/
-├── file_tools.py              # CLI entry-point
+mmo_file_tools/
+├── mmo_file_tools.py          # CLI entry-point
 ├── pyproject.toml             # Project metadata & dependencies
-├── file_tools/
+├── mmo_file_tools/
 │   ├── __init__.py
 │   ├── main.py                # FastAPI app & all API endpoints
 │   ├── desktop.py             # pywebview wrapper
@@ -162,10 +162,10 @@ FileTools/
 pytest
 
 # Run a single test file
-pytest file_tools/tests/test_date_sorter.py -v
+pytest mmo_file_tools/tests/test_date_sorter.py -v
 
 # Run with coverage report
-pytest --cov=file_tools --cov-report=term-missing
+pytest --cov=mmo_file_tools --cov-report=term-missing
 ```
 
 Tests target **100% code coverage** with no warnings or errors.
@@ -175,7 +175,7 @@ Tests target **100% code coverage** with no warnings or errors.
 Requires [NSIS](https://nsis.sourceforge.io/) installed and `makensis` on your PATH.
 
 ```bash
-python file_tools.py installer
+python mmo_file_tools.py installer
 ```
 
 The installer executable is written to `build/`.
@@ -184,7 +184,7 @@ The installer executable is written to `build/`.
 
 ## Privacy
 
-FileTools is a fully offline application. All file processing happens locally. No data is transmitted to external servers, no cookies or tracking are used, and all fonts/icons are bundled locally. See the in-app **Data Privacy** section for full details.
+MMO FileTools is a fully offline application. All file processing happens locally. No data is transmitted to external servers, no cookies or tracking are used, and all fonts/icons are bundled locally. See the in-app **Data Privacy** section for full details.
 
 ---
 
@@ -194,7 +194,7 @@ FileTools is a fully offline application. All file processing happens locally. N
 
 - Website: [michaelmuelleronline.de](https://michaelmuelleronline.de)
 - GitHub: [github.com/MichaelMueller](https://github.com/MichaelMueller)
-- Project: [github.com/MichaelMueller/FileTools](https://github.com/MichaelMueller/FileTools)
+- Project: [github.com/MichaelMueller/mmo_file_tools](https://github.com/MichaelMueller/mmo_file_tools)
 
 ---
 

@@ -1,4 +1,4 @@
-"""Tests for file_tools.desktop (pywebview desktop launcher)."""
+"""Tests for mmo_file_tools.desktop (pywebview desktop launcher)."""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ class TestPortHelpers:
     """Tests for _port_available and _find_port."""
 
     def test_port_available_free(self) -> None:
-        from file_tools.desktop import _port_available
+        from mmo_file_tools.desktop import _port_available
 
         # Use a high ephemeral port that is very likely free
         assert _port_available("127.0.0.1", 0) is True or True  # port 0 => OS picks
 
     def test_port_available_occupied(self) -> None:
-        from file_tools.desktop import _port_available
+        from mmo_file_tools.desktop import _port_available
 
         # Bind a port, then check it's not available
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -32,14 +32,14 @@ class TestPortHelpers:
             assert _port_available("127.0.0.1", port) is False
 
     def test_find_port_returns_free(self) -> None:
-        from file_tools.desktop import _find_port
+        from mmo_file_tools.desktop import _find_port
 
         port = _find_port("127.0.0.1", 19000, 5)
         assert isinstance(port, int)
         assert port >= 19000
 
     def test_find_port_skips_occupied(self) -> None:
-        from file_tools.desktop import _find_port
+        from mmo_file_tools.desktop import _find_port
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))
@@ -49,9 +49,9 @@ class TestPortHelpers:
             assert found > occupied
 
     def test_find_port_raises_after_attempts(self) -> None:
-        from file_tools.desktop import _find_port
+        from mmo_file_tools.desktop import _find_port
 
-        with patch("file_tools.desktop._port_available", return_value=False):
+        with patch("mmo_file_tools.desktop._port_available", return_value=False):
             with pytest.raises(RuntimeError, match="Could not find a free port"):
                 _find_port("127.0.0.1", 8765, 3)
 
@@ -82,13 +82,13 @@ def test_run_desktop_starts_server_and_webview() -> None:
 
     with (
         patch.dict("sys.modules", {"webview": mock_webview}),
-        patch("file_tools.desktop.webview", mock_webview),
-        patch("file_tools.desktop.threading.Thread", mock_thread_cls),
-        patch("file_tools.desktop._wait_for_server") as mock_wait,
-        patch("file_tools.desktop._find_port", return_value=9876),
+        patch("mmo_file_tools.desktop.webview", mock_webview),
+        patch("mmo_file_tools.desktop.threading.Thread", mock_thread_cls),
+        patch("mmo_file_tools.desktop._wait_for_server") as mock_wait,
+        patch("mmo_file_tools.desktop._find_port", return_value=9876),
         patch("os._exit") as mock_exit,
     ):
-        from file_tools.desktop import run_desktop
+        from mmo_file_tools.desktop import run_desktop
 
         on_ready = MagicMock()
         run_desktop(host="127.0.0.1", port=9876, on_ready=on_ready)
@@ -104,7 +104,7 @@ def test_run_desktop_starts_server_and_webview() -> None:
 
         # pywebview window created
         mock_webview.create_window.assert_called_once_with(
-            title="FileTools",
+            title="MMO FileTools",
             url="http://127.0.0.1:9876",
             width=1200,
             height=800,
@@ -144,13 +144,13 @@ def test_run_desktop_swallows_base_exception_on_close() -> None:
 
     with (
         patch.dict("sys.modules", {"webview": mock_webview}),
-        patch("file_tools.desktop.webview", mock_webview),
-        patch("file_tools.desktop.threading.Thread", mock_thread_cls),
-        patch("file_tools.desktop._wait_for_server"),
-        patch("file_tools.desktop._find_port", return_value=9876),
+        patch("mmo_file_tools.desktop.webview", mock_webview),
+        patch("mmo_file_tools.desktop.threading.Thread", mock_thread_cls),
+        patch("mmo_file_tools.desktop._wait_for_server"),
+        patch("mmo_file_tools.desktop._find_port", return_value=9876),
         patch("os._exit") as mock_exit,
     ):
-        from file_tools.desktop import run_desktop
+        from mmo_file_tools.desktop import run_desktop
 
         run_desktop(host="127.0.0.1", port=9876)
 
@@ -160,7 +160,7 @@ def test_run_desktop_swallows_base_exception_on_close() -> None:
 
 def test_wait_for_server_succeeds() -> None:
     """_wait_for_server returns once the server accepts a connection."""
-    from file_tools.desktop import _wait_for_server
+    from mmo_file_tools.desktop import _wait_for_server
 
     # Use a real listening socket so create_connection succeeds immediately.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -172,7 +172,7 @@ def test_wait_for_server_succeeds() -> None:
 
 def test_wait_for_server_retries_then_succeeds() -> None:
     """_wait_for_server keeps retrying until the port opens."""
-    from file_tools.desktop import _wait_for_server
+    from mmo_file_tools.desktop import _wait_for_server
 
     call_count = 0
     real_create_conn = socket.create_connection
@@ -189,14 +189,14 @@ def test_wait_for_server_retries_then_succeeds() -> None:
         s.bind(("127.0.0.1", 0))
         s.listen(1)
         port = s.getsockname()[1]
-        with patch("file_tools.desktop.socket.create_connection", side_effect=_flaky_connect):
+        with patch("mmo_file_tools.desktop.socket.create_connection", side_effect=_flaky_connect):
             _wait_for_server("127.0.0.1", port, timeout=5.0)
         assert call_count >= 3
 
 
 def test_wait_for_server_timeout() -> None:
     """_wait_for_server raises RuntimeError when the timeout expires."""
-    from file_tools.desktop import _wait_for_server
+    from mmo_file_tools.desktop import _wait_for_server
 
     # Pick a port that nothing is listening on
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -214,11 +214,11 @@ def test_run_server_uses_uvicorn() -> None:
     mock_server_cls = MagicMock(return_value=mock_server)
 
     with (
-        patch("file_tools.desktop.uvicorn.Config", mock_config_cls),
-        patch("file_tools.desktop.uvicorn.Server", mock_server_cls),
+        patch("mmo_file_tools.desktop.uvicorn.Config", mock_config_cls),
+        patch("mmo_file_tools.desktop.uvicorn.Server", mock_server_cls),
     ):
-        import file_tools.desktop as desktop_mod
-        from file_tools.desktop import _run_server, app
+        import mmo_file_tools.desktop as desktop_mod
+        from mmo_file_tools.desktop import _run_server, app
 
         _run_server("127.0.0.1", 8765)
 

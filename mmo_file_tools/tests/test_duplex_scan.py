@@ -1,4 +1,4 @@
-"""Tests for file_tools.tools.duplex_scan."""
+"""Tests for mmo_file_tools.tools.duplex_scan."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import io
 import pytest
 from pypdf import PdfReader, PdfWriter
 
-from file_tools.tools.duplex_scan import merge_duplex
+from mmo_file_tools.tools.duplex_scan import merge_duplex
 
 
 # ---------------------------------------------------------------------------

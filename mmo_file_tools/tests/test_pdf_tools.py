@@ -1,4 +1,4 @@
-"""Tests for file_tools.tools.pdf_tools."""
+"""Tests for mmo_file_tools.tools.pdf_tools."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 from pypdf import PdfReader
 
-from file_tools.tools.pdf_tools import (
+from mmo_file_tools.tools.pdf_tools import (
     image_to_pdf,
     merge_pdfs,
     parse_page_ranges,

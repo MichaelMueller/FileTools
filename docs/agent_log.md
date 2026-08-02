@@ -1,5 +1,44 @@
 # Agent Log
 
+## 2026-08-02 09:43 – Rename to MMO FileTools / `mmo_file_tools` (v1.4.0)
+
+### Summary
+Renamed the whole project: Python package `file_tools` → `mmo_file_tools`, distribution
+`file-tools` → `mmo-file-tools`, display name `FileTools` → `MMO FileTools`, filesystem/registry
+slug `mmo_file_tools`. GitHub repo was renamed to `MichaelMueller/mmo_file_tools` beforehand.
+Version bumped 1.3.7 → 1.4.0. Deliberate hard cut on user data — no migration of the old
+`%LOCALAPPDATA%\FileTools` databases.
+
+### Changes
+- **Package** – `git mv file_tools mmo_file_tools`, `git mv file_tools.py mmo_file_tools.py`;
+  all imports and path references updated
+- **`pyproject.toml`** – name `mmo-file-tools`, version 1.4.0, console scripts
+  `mmo-file-tools` / `mmo-file-tools-desktop`, `testpaths`, coverage source and hatch packages
+- **`mmo_file_tools/main.py`** – FastAPI title `MMO FileTools`, version 1.4.0
+- **`mmo_file_tools/desktop.py`** – window title, AUMID `DrMichaelMueller.MmoFileTools`,
+  error log `mmo_file_tools-error.log`
+- **`mmo_file_tools/splash.py`** – Win32 class `MmoFileToolsSplash`, splash text
+- **`mmo_file_tools/static/index.html`** – title, header, privacy text, GitHub links
+- **`mmo_file_tools/tools/dedup_scanner.py` / `pdf2dcm.py`** – data dir
+  `user_data_dir("mmo_file_tools")`, DBs `mmo_file_tools_dedup.db` / `mmo_file_tools_pdf2dcm.db`
+  (hard cut: existing caches are not migrated)
+- **`mmo_file_tools/tools/installer_builder.py`** – new `APP_SLUG` constant separating the
+  display name from filesystem/registry names; NSIS `OutFile`, `InstallDir`, uninstall registry
+  key, Start Menu folder and shortcuts reworked accordingly; `APP_VERSION` 1.4.0
+- **`mmo_file_tools.py`** – AUMID, launcher stem `mmo_file_tools-<tag>`, ps2exe title
+- **`README.md`, `.github/copilot-instructions.md`** – headings, directory rules, commands, links
+- **Tests** – imports, monkeypatch targets and asserted strings across all test modules
+- **Cleanup** – removed stale dev launchers in `build/` and `var/`; reinstalled the editable
+  package under the new name
+
+### Verification
+348 tests pass. Coverage 98.85% — the 100% gate fails, but a baseline run at HEAD (`c2aab2c`)
+shows the identical 16 uncovered lines (`desktop.py` 102-106, `main.py` 249-250/669/673-674/
+706-707/733, `image_shrinker.py` 54-56), so the gap predates this rename.
+Web mode boots and serves the page with title `MMO FileTools`.
+
+---
+
 ## 2026-03-18 18:10 – Version bump to 1.3.7 & installer build
 
 ### Summary

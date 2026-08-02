@@ -1,4 +1,4 @@
-"""Shared test fixtures for FileTools tests."""
+"""Shared test fixtures for MMO FileTools tests."""
 
 from __future__ import annotations
 

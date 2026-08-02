@@ -1,4 +1,4 @@
-"""Tests for file_tools.splash (Win32 splash screen)."""
+"""Tests for mmo_file_tools.splash (Win32 splash screen)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from file_tools.splash import Splash
+from mmo_file_tools.splash import Splash
 
 
 class TestSplashInit:
@@ -15,7 +15,7 @@ class TestSplashInit:
 
     def test_default_values(self) -> None:
         s = Splash()
-        assert s._text == "FileTools initialization \u2026"
+        assert s._text == "MMO FileTools initialization \u2026"
         assert s._width == 400
         assert s._height == 170
         assert s._hwnd == 0
@@ -52,7 +52,7 @@ class TestSplashShow:
 
         with (
             patch.object(sys, "platform", "win32"),
-            patch("file_tools.splash.threading.Thread", return_value=mock_thread) as mock_cls,
+            patch("mmo_file_tools.splash.threading.Thread", return_value=mock_thread) as mock_cls,
         ):
             s.show()
             mock_cls.assert_called_once()

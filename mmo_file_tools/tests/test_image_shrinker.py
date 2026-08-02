@@ -1,4 +1,4 @@
-"""Tests for file_tools.tools.image_shrinker."""
+"""Tests for mmo_file_tools.tools.image_shrinker."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from file_tools.tools.image_shrinker import ImageShrinker
+from mmo_file_tools.tools.image_shrinker import ImageShrinker
 
 
 # ---------------------------------------------------------------------------

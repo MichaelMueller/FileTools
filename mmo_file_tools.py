@@ -1,12 +1,12 @@
-"""FileTools CLI entry-point.
+"""MMO FileTools CLI entry-point.
 
 Usage::
 
-    python file_tools.py              # desktop mode (default)
-    python file_tools.py --web        # web-only mode
-    python file_tools.py --mode web   # same as above
-    python file_tools.py installer    # build Windows NSIS installer
-    python file_tools.py exe          # create a dev launcher (.bat + .lnk)
+    python mmo_file_tools.py              # desktop mode (default)
+    python mmo_file_tools.py --web        # web-only mode
+    python mmo_file_tools.py --mode web   # same as above
+    python mmo_file_tools.py installer    # build Windows NSIS installer
+    python mmo_file_tools.py exe          # create a dev launcher (.bat + .lnk)
 """
 
 from __future__ import annotations
@@ -16,22 +16,22 @@ import sys
 
 
 def run(mode: str = "desktop") -> None:
-    """Launch FileTools in the chosen *mode* (``desktop`` or ``web``)."""
+    """Launch MMO FileTools in the chosen *mode* (``desktop`` or ``web``)."""
     mode = mode.strip().lower()
 
     if mode == "web":
-        from file_tools.main import run_web
+        from mmo_file_tools.main import run_web
 
         run_web()
     elif mode == "desktop":
         # Show a splash *before* the heavy imports (uvicorn, webview, etc.)
-        from file_tools.splash import Splash
+        from mmo_file_tools.splash import Splash
 
         splash = Splash()
         splash.show()
 
         try:
-            from file_tools.desktop import run_desktop
+            from mmo_file_tools.desktop import run_desktop
 
             run_desktop(on_ready=splash.close)
         except Exception:
@@ -42,7 +42,7 @@ def run(mode: str = "desktop") -> None:
         sys.exit(1)
 
 
-_APP_AUMID = "DrMichaelMueller.FileTools"
+_APP_AUMID = "DrMichaelMueller.MmoFileTools"
 
 
 def _stamp_lnk_aumid(lnk_path: "Path", aumid: str) -> None:
@@ -60,50 +60,46 @@ def _stamp_lnk_aumid(lnk_path: "Path", aumid: str) -> None:
 
     # Build the PS1 script via string concat to keep f-string substitution ({lnk_path},
     # {aumid}) separate from the C# braces and PowerShell here-string delimiters.
-    # SHGetPropertyStoreFromParsingName signature:
-    #   HRESULT Get(PCWSTR, IBindCtx*, GETPROPERTYSTOREFLAGS, REFIID, void**ppv)
-    # The interface pointer is returned via the last out-param, NOT as the return value.
+    # [MarshalAs(UnmanagedType.Interface)] returns System.__ComObject which only supports
+    # IDispatch (late binding) — PowerShell can't vtable-dispatch our IPS interface on it.
+    # Fix: get raw IntPtr, then Marshal.GetTypedObjectForIUnknown to force the vtable cast.
+    # All COM work is done in C# so PowerShell only needs one static call.
     ps1 = (
         '$cs = @"\n'
         "using System; using System.Runtime.InteropServices;\n"
         '[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),\n'
         " InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
-        "public interface IPS {\n"
+        "public interface FtIPS {\n"
         "    [PreserveSig] int GetCount(out uint c);\n"
-        "    [PreserveSig] int GetAt(uint i, out PK k);\n"
-        "    [PreserveSig] int GetValue(ref PK k, out PV v);\n"
-        "    [PreserveSig] int SetValue(ref PK k, ref PV v);\n"
+        "    [PreserveSig] int GetAt(uint i, out FtPK k);\n"
+        "    [PreserveSig] int GetValue(ref FtPK k, out FtPV v);\n"
+        "    [PreserveSig] int SetValue(ref FtPK k, ref FtPV v);\n"
         "    [PreserveSig] int Commit();\n"
         "}\n"
         "[StructLayout(LayoutKind.Sequential, Pack=4)]\n"
-        "public struct PK { public Guid fmtid; public uint pid; }\n"
+        "public struct FtPK { public Guid fmtid; public uint pid; }\n"
         "[StructLayout(LayoutKind.Explicit, Size=24)]\n"
-        "public struct PV {\n"
-        "    [FieldOffset(0)] public ushort vt;\n"
-        "    [FieldOffset(8)] public IntPtr pw;\n"
-        "}\n"
-        "public static class SH {\n"
+        "public struct FtPV { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr pw; }\n"
+        "public static class FtSH {\n"
         '    [DllImport("shell32", CharSet=CharSet.Unicode,\n'
         '               EntryPoint="SHGetPropertyStoreFromParsingName")]\n'
-        "    public static extern int Get(string p, IntPtr b, int f,\n"
-        "        [In] ref Guid r,\n"
-        "        [MarshalAs(UnmanagedType.Interface)] out IPS s);\n"
+        "    public static extern int Get(string p, IntPtr b, int f, [In] ref Guid r, out IntPtr s);\n"
+        "    public static void SetAUMID(string path, string aumid) {\n"
+        '        var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");\n'
+        "        IntPtr ptr; int hr = Get(path, IntPtr.Zero, 2, ref iid, out ptr);\n"
+        '        if (hr < 0) throw new Exception("GetPropertyStore: 0x" + hr.ToString("X8"));\n'
+        "        var store = (FtIPS)Marshal.GetTypedObjectForIUnknown(ptr, typeof(FtIPS));\n"
+        "        Marshal.Release(ptr);\n"
+        '        var key = new FtPK { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };\n'
+        "        var pv = new FtPV { vt = 31 };\n"
+        "        pv.pw = Marshal.StringToCoTaskMemUni(aumid);\n"
+        "        try { store.SetValue(ref key, ref pv); store.Commit(); }\n"
+        "        finally { Marshal.FreeCoTaskMem(pv.pw); }\n"
+        "    }\n"
         "}\n"
         '"@\n'
         "Add-Type -Language CSharp -TypeDefinition $cs\n"
-        f'$iid = [Guid]"886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"\n'
-        f"$s = $null\n"
-        f'$hr = [SH]::Get("{lnk_path}", [IntPtr]::Zero, 2, [ref]$iid, [ref]$s)\n'
-        f"if ($hr -lt 0) {{ throw \"SHGetPropertyStoreFromParsingName failed: 0x$($hr.ToString('X8'))\" }}\n"
-        f"$k = New-Object PK\n"
-        f'$k.fmtid = [Guid]"9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"\n'
-        f"$k.pid = 5\n"
-        f"$v = New-Object PV\n"
-        f"$v.vt = 31\n"
-        f'$v.pw = [System.Runtime.InteropServices.Marshal]::StringToCoTaskMemUni("{aumid}")\n'
-        f"$s.SetValue([ref]$k, [ref]$v)\n"
-        f"$s.Commit()\n"
-        f"[System.Runtime.InteropServices.Marshal]::FreeCoTaskMem($v.pw)\n"
+        f'[FtSH]::SetAUMID("{lnk_path}", "{aumid}")\n'
     )
 
     fd, ps_path = tempfile.mkstemp(suffix=".ps1")
@@ -122,13 +118,13 @@ def _stamp_lnk_aumid(lnk_path: "Path", aumid: str) -> None:
 
 
 def create_dev_exe() -> None:
-    """Create a no-console launcher (.bat + .lnk shortcut) using the current venv."""
+    """Create a no-console launcher (.bat + .lnk + .exe) using the current venv."""
     import subprocess
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parent
-    build_dir = project_root / "build"
-    build_dir.mkdir(exist_ok=True)
+    out_dir = project_root / "var"
+    out_dir.mkdir(exist_ok=True)
 
     # Prefer pythonw.exe (no console window) from the same Scripts dir as the
     # running interpreter.  Fall back to python.exe if pythonw.exe isn't there.
@@ -136,11 +132,21 @@ def create_dev_exe() -> None:
     pythonw = python_exe.parent / "pythonw.exe"
     launcher_exe = pythonw if pythonw.is_file() else python_exe
 
-    script = project_root / "file_tools.py"
-    icon = project_root / "file_tools" / "static" / "icon.ico"
+    script = project_root / "mmo_file_tools.py"
+    icon = project_root / "mmo_file_tools" / "static" / "icon.ico"
+
+    # Use the latest git tag as the version suffix (falls back to "local" if no tags).
+    try:
+        tag = subprocess.check_output(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=project_root, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        tag = "local"
+    stem = f"mmo_file_tools-{tag}"
 
     # --- .bat (double-click or pin to taskbar) ---
-    bat = build_dir / "FileTools-dev.bat"
+    bat = out_dir / f"{stem}.bat"
     bat.write_text(
         f'@echo off\r\n'
         f'start "" "{launcher_exe}" "{script}"\r\n',
@@ -149,7 +155,7 @@ def create_dev_exe() -> None:
     print(f"  bat  -> {bat}")
 
     # --- .lnk shortcut (can be moved to Desktop / Start Menu) ---
-    lnk = build_dir / "FileTools-dev.lnk"
+    lnk = out_dir / f"{stem}.lnk"
     ps = (
         f'$ws = New-Object -ComObject WScript.Shell; '
         f'$sc = $ws.CreateShortcut("{lnk}"); '
@@ -170,14 +176,39 @@ def create_dev_exe() -> None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("  lnk  -> skipped (PowerShell not available)")
 
-    print("Done. Copy the .lnk to your Desktop or Start Menu to use it as a shortcut.")
+    # --- .exe via ps2exe (real executable with embedded icon) ---
+    exe = out_dir / f"{stem}.exe"
+    ps1_tmp = out_dir / "_launcher_tmp.ps1"
+    ps1_tmp.write_text(
+        f'Start-Process -FilePath "{launcher_exe}" -ArgumentList \'"{script}"\'\r\n',
+        encoding="utf-8",
+    )
+    icon_arg = f' -iconFile "{icon}"' if icon.is_file() else ""
+    ps_compile = (
+        f'Import-Module ps2exe; '
+        f'Invoke-ps2exe -inputFile "{ps1_tmp}" -outputFile "{exe}"'
+        f'{icon_arg} -noConsole -title "MMO FileTools"'
+    )
+    try:
+        subprocess.check_call(
+            ["powershell", "-NoProfile", "-Command", ps_compile],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"  exe  -> {exe}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("  exe  -> skipped (ps2exe not installed; run: Install-Module ps2exe)")
+    finally:
+        ps1_tmp.unlink(missing_ok=True)
+
+    print(f"Done. Copy {stem}.exe (or .lnk) to your Desktop or Start Menu.")
 
 
 def create_installer() -> None:
     """Build a Windows NSIS installer (portable venv + source)."""
     from pathlib import Path
 
-    from file_tools.tools.installer_builder import InstallerBuilder
+    from mmo_file_tools.tools.installer_builder import InstallerBuilder
 
     project_root = Path(__file__).resolve().parent
     builder = InstallerBuilder(project_root)
@@ -187,7 +218,7 @@ def create_installer() -> None:
 
 
 def _cli() -> None:
-    parser = argparse.ArgumentParser(description="FileTools launcher")
+    parser = argparse.ArgumentParser(description="MMO FileTools launcher")
     sub = parser.add_subparsers(dest="command")
 
     # Default run mode (no subcommand)

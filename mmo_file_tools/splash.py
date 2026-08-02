@@ -84,13 +84,13 @@ class Splash:
     Safe to call on non-Windows platforms (``show`` is a no-op).
     """
 
-    _CLASS_NAME = "FileToolsSplash"
+    _CLASS_NAME = "MmoFileToolsSplash"
     _BG_COLOR = _rgb(0x1E, 0x1E, 0x2E)
     _FG_COLOR = _rgb(0xCD, 0xD6, 0xF4)
 
     def __init__(
         self,
-        text: str = "FileTools initialization \u2026",
+        text: str = "MMO FileTools initialization \u2026",
         *,
         width: int = 400,
         height: int = 170,
@@ -217,7 +217,7 @@ class Splash:
         hwnd = user32.CreateWindowExW(
             _WS_EX_TOPMOST | _WS_EX_TOOLWINDOW | _WS_EX_LAYERED,
             self._CLASS_NAME,
-            "FileTools",
+            "MMO FileTools",
             _WS_POPUP | _WS_VISIBLE,
             x, y, self._width, self._height,
             None, None, hinstance, None,

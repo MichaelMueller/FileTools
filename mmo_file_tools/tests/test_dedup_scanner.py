@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from file_tools.tools.dedup_scanner import DedupScanner
+from mmo_file_tools.tools.dedup_scanner import DedupScanner
 
 
 # ---------------------------------------------------------------------------

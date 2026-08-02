@@ -1,10 +1,10 @@
-"""Tests for file_tools.tools.dir_compare."""
+"""Tests for mmo_file_tools.tools.dir_compare."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from file_tools.tools.dir_compare import (
+from mmo_file_tools.tools.dir_compare import (
     compare_directories,
     hash_file,
     sync_directories,

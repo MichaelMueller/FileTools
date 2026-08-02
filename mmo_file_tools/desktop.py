@@ -11,7 +11,7 @@ from pathlib import Path
 import uvicorn
 import webview
 
-from file_tools.main import app, set_webview_window
+from mmo_file_tools.main import app, set_webview_window
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8765
@@ -90,7 +90,7 @@ def run_desktop(
     if sys.platform == "win32":
         import ctypes  # noqa: PLC0415
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DrMichaelMueller.FileTools")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DrMichaelMueller.MmoFileTools")
 
     port = _find_port(host, port, _PORT_ATTEMPTS)
 
@@ -102,12 +102,12 @@ def run_desktop(
     except RuntimeError as exc:
         if sys.platform == "win32":
             import ctypes  # noqa: PLC0415
-            ctypes.windll.user32.MessageBoxW(0, str(exc), "FileTools – Startup Error", 0x10)
+            ctypes.windll.user32.MessageBoxW(0, str(exc), "MMO FileTools – Startup Error", 0x10)
         raise
 
     _icon_path = str(Path(__file__).parent / "static" / "icon.ico")
     window = webview.create_window(
-        title="FileTools",
+        title="MMO FileTools",
         url=f"http://{host}:{port}",
         width=1200,
         height=800,
@@ -202,14 +202,14 @@ def run_desktop(
     # Start the GUI and surface any errors to the user (no console when
     # launched from the installer). If webview fails to create or start
     # (missing WebView2 runtime, pythonnet issues, etc.), write a traceback
-    # to `filetools-error.log` in the current working directory and show a
+    # to `mmo_file_tools-error.log` in the current working directory and show a
     # MessageBox so the user is aware of the failure.
     def _log_and_alert(msg: str, exc: Exception | None = None) -> None:  # pragma: no cover
         try:
             import ctypes
             import traceback as _tb
             # write traceback
-            log = Path.cwd() / "filetools-error.log"
+            log = Path.cwd() / "mmo_file_tools-error.log"
             with open(log, "a", encoding="utf-8") as f:
                 f.write(msg + "\n")
                 if exc is not None:
@@ -218,7 +218,7 @@ def run_desktop(
         except Exception:
             pass
         try:
-            ctypes.windll.user32.MessageBoxW(0, msg, "FileTools - Error", 0x10)
+            ctypes.windll.user32.MessageBoxW(0, msg, "MMO FileTools - Error", 0x10)
         except Exception:
             pass
 
@@ -228,7 +228,7 @@ def run_desktop(
         # Attempt graceful uvicorn shutdown
         if _uvicorn_server is not None:
             _uvicorn_server.should_exit = True
-        _log_and_alert("FileTools failed to start the GUI. See filetools-error.log for details.", exc)
+        _log_and_alert("MMO FileTools failed to start the GUI. See mmo_file_tools-error.log for details.", exc)
         # Ensure process exit to avoid leaving background threads running
         import os  # noqa: PLC0415
         os._exit(1)

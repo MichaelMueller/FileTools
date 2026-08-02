@@ -25,6 +25,6 @@ You are working in a professional Python backend project.
 
 ## Directory layout
 
-- All code must live under the top-level `file_tools/` directory
-- All tests must live under `file_tools/tests/`
+- All code must live under the top-level `mmo_file_tools/` directory
+- All tests must live under `mmo_file_tools/tests/`
 

@@ -1,4 +1,4 @@
-"""Tests for file_tools.tools.installer_builder."""
+"""Tests for mmo_file_tools.tools.installer_builder."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from file_tools.tools.installer_builder import InstallerBuilder
+from mmo_file_tools.tools.installer_builder import InstallerBuilder
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ class TestSteps:
         nsi = builder._write_nsis_script()
         assert nsi.exists()
         content = nsi.read_text(encoding="utf-8")
-        assert "FileTools" in content
+        assert "MMO FileTools" in content
         assert "MUI2.nsh" in content
         assert "Uninstall" in content
         # Shortcuts must point to pythonw.exe directly (no console)
@@ -155,18 +155,18 @@ class TestSteps:
         builder._clean()
         builder._create_staging()
         # Create minimal project structure
-        pkg = tmp_path / "file_tools"
+        pkg = tmp_path / "mmo_file_tools"
         pkg.mkdir()
         (pkg / "__init__.py").write_text("")
         static = pkg / "static"
         static.mkdir()
         (static / "icon.ico").write_bytes(b"\x00")
         (static / "index.html").write_text("<html></html>")
-        (tmp_path / "file_tools.py").write_text("print('hi')")
+        (tmp_path / "mmo_file_tools.py").write_text("print('hi')")
         builder._copy_source()
         dest = builder._staging / "app"
-        assert (dest / "file_tools" / "__init__.py").exists()
-        assert (dest / "file_tools.py").exists()
+        assert (dest / "mmo_file_tools" / "__init__.py").exists()
+        assert (dest / "mmo_file_tools.py").exists()
         assert (dest / "icon.ico").exists()
 
     def test_precompile(self, builder: InstallerBuilder) -> None:
@@ -329,7 +329,7 @@ class TestSteps:
             "pip==23.0\n"
             "setuptools==69.0\n"
             "wheel==0.42\n"
-            "file-tools==1.0\n"
+            "mmo-file-tools==1.0\n"
             "click==8.1.7\n"
         )
         with (
@@ -344,7 +344,7 @@ class TestSteps:
         assert "click==8.1.7" in content
         assert "pip" not in content
         assert "setuptools" not in content
-        assert "file-tools" not in content
+        assert "mmo-file-tools" not in content
         assert "comment" not in content
 
     def test_make_venv_portable_existing_dlls(
@@ -495,14 +495,14 @@ class TestBuild:
         nsis.touch()
 
         # Set up minimal project structure
-        pkg = tmp_path / "file_tools"
+        pkg = tmp_path / "mmo_file_tools"
         pkg.mkdir()
         (pkg / "__init__.py").write_text("")
         static = pkg / "static"
         static.mkdir()
         (static / "icon.ico").write_bytes(b"\x00")
         (static / "index.html").write_text("<html></html>")
-        (tmp_path / "file_tools.py").write_text("print('hi')")
+        (tmp_path / "mmo_file_tools.py").write_text("print('hi')")
 
         builder = InstallerBuilder(tmp_path, nsis_path=nsis)
 

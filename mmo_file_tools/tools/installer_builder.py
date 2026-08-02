@@ -15,12 +15,12 @@ from pathlib import Path
 
 
 class InstallerBuilder:
-    """Create a portable Windows installer for FileTools.
+    """Create a portable Windows installer for MMO FileTools.
 
     Parameters
     ----------
     project_root:
-        Root directory of the FileTools project (where ``pyproject.toml`` lives).
+        Root directory of the MMO FileTools project (where ``pyproject.toml`` lives).
     build_dir:
         Scratch directory for staging the installer payload.
         Defaults to ``<project_root>/build/installer``.
@@ -36,10 +36,12 @@ class InstallerBuilder:
         r"C:\Program Files\NSIS\makensis.exe",
     ]
 
-    APP_NAME = "FileTools"
-    APP_VERSION = "1.3.7"
+    APP_NAME = "MMO FileTools"
+    #: Filesystem/registry-safe form of :attr:`APP_NAME` (no spaces).
+    APP_SLUG = "mmo_file_tools"
+    APP_VERSION = "1.4.0"
     APP_PUBLISHER = "Dr. Michael Müller"
-    APP_EXE_NAME = "FileTools.bat"
+    APP_EXE_NAME = "mmo_file_tools.bat"
 
     def __init__(
         self,
@@ -176,7 +178,7 @@ class InstallerBuilder:
              "--exclude-editable"],
             text=True,
         )
-        skip = preseed_names | {"file-tools", "file_tools", "pip",
+        skip = preseed_names | {"mmo-file-tools", "mmo_file_tools", "pip",
                                 "setuptools", "wheel"}
         reqs: list[str] = []
         for line in freeze.splitlines():
@@ -286,18 +288,18 @@ class InstallerBuilder:
         """Copy project source into the staging area."""
         dest = self._staging / "app"
 
-        # Copy the file_tools package
+        # Copy the mmo_file_tools package
         shutil.copytree(
-            self.project_root / "file_tools",
-            dest / "file_tools",
+            self.project_root / "mmo_file_tools",
+            dest / "mmo_file_tools",
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests"),
         )
 
         # Copy the entry-point script
-        shutil.copy2(self.project_root / "file_tools.py", dest / "file_tools.py")
+        shutil.copy2(self.project_root / "mmo_file_tools.py", dest / "mmo_file_tools.py")
 
         # Copy the icon
-        icon_src = self.project_root / "file_tools" / "static" / "icon.ico"
+        icon_src = self.project_root / "mmo_file_tools" / "static" / "icon.ico"
         if icon_src.exists():
             shutil.copy2(icon_src, dest / "icon.ico")
 
@@ -327,7 +329,7 @@ class InstallerBuilder:
         # occurs.  Uses absolute paths so it works regardless of CWD.
         launcher = self._staging / "app" / "launcher.pyw"
         launcher.write_text(
-            '"""FileTools launcher \u2014 error-safe wrapper around file_tools.py."""\n'
+            '"""MMO FileTools launcher \u2014 error-safe wrapper around mmo_file_tools.py."""\n'
             '\n'
             'import os, sys, traceback, runpy, datetime\n'
             '\n'
@@ -336,13 +338,13 @@ class InstallerBuilder:
             'def _show_error(msg):\n'
             '    try:\n'
             '        import ctypes\n'
-            '        ctypes.windll.user32.MessageBoxW(0, msg, "FileTools - Error", 0x10)\n'
+            '        ctypes.windll.user32.MessageBoxW(0, msg, "MMO FileTools - Error", 0x10)\n'
             '    except Exception:\n'
             '        pass\n'
             '\n'
             'def _log_error(tb):\n'
             '    try:\n'
-            '        log = os.path.join(_APP_DIR, "filetools-error.log")\n'
+            '        log = os.path.join(_APP_DIR, "mmo_file_tools-error.log")\n'
             '        with open(log, "a", encoding="utf-8") as f:\n'
             '            f.write("\\n--- " + datetime.datetime.now().isoformat() + " ---\\n")\n'
             '            f.write(tb + "\\n")\n'
@@ -355,16 +357,16 @@ class InstallerBuilder:
             '        sys.path.insert(0, _APP_DIR)\n'
             '    try:\n'
             '        runpy.run_path(\n'
-            '            os.path.join(_APP_DIR, "file_tools.py"),\n'
+            '            os.path.join(_APP_DIR, "mmo_file_tools.py"),\n'
             '            run_name="__main__",\n'
             '        )\n'
             '    except Exception:\n'
             '        tb = traceback.format_exc()\n'
             '        _log_error(tb)\n'
             '        _show_error(\n'
-            '            "FileTools failed to start.\\n\\n"\n'
+            '            "MMO FileTools failed to start.\\n\\n"\n'
             '            "Details written to:\\n"\n'
-            '            + os.path.join(_APP_DIR, "filetools-error.log")\n'
+            '            + os.path.join(_APP_DIR, "mmo_file_tools-error.log")\n'
             '        )\n'
             '        sys.exit(1)\n'
             '\n'
@@ -384,9 +386,9 @@ class InstallerBuilder:
 
             ; --- General ---
             Name "{self.APP_NAME}"
-            OutFile "{self._output / f'{self.APP_NAME}-{self.APP_VERSION}-Setup.exe'}"
-            InstallDir "$LOCALAPPDATA\\{self.APP_NAME}"
-            InstallDirRegKey HKCU "Software\\{self.APP_NAME}" "InstallDir"
+            OutFile "{self._output / f'{self.APP_SLUG}-{self.APP_VERSION}-Setup.exe'}"
+            InstallDir "$LOCALAPPDATA\\{self.APP_SLUG}"
+            InstallDirRegKey HKCU "Software\\{self.APP_SLUG}" "InstallDir"
             RequestExecutionLevel user
             SetCompressor /SOLID lzma
 
@@ -416,26 +418,26 @@ class InstallerBuilder:
                 WriteUninstaller "$INSTDIR\\Uninstall.exe"
 
                 ; Registry keys for Add/Remove Programs
-                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_NAME}" \\
+                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_SLUG}" \\
                     "DisplayName" "{self.APP_NAME}"
-                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_NAME}" \\
+                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_SLUG}" \\
                     "UninstallString" "$\\"$INSTDIR\\Uninstall.exe$\\""
-                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_NAME}" \\
+                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_SLUG}" \\
                     "Publisher" "{self.APP_PUBLISHER}"
-                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_NAME}" \\
+                WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_SLUG}" \\
                     "DisplayVersion" "{self.APP_VERSION}"
-                {"WriteRegStr HKCU " + '"' + "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\" + self.APP_NAME + '"' + " " + '"DisplayIcon" "$INSTDIR\\\\icon.ico"' if has_icon else ""}
+                {"WriteRegStr HKCU " + '"' + "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\" + self.APP_SLUG + '"' + " " + '"DisplayIcon" "$INSTDIR\\\\icon.ico"' if has_icon else ""}
 
                 ; Store install dir
-                WriteRegStr HKCU "Software\\{self.APP_NAME}" "InstallDir" "$INSTDIR"
+                WriteRegStr HKCU "Software\\{self.APP_SLUG}" "InstallDir" "$INSTDIR"
 
                 ; Start Menu shortcut — launch pythonw.exe directly (no console)
-                CreateDirectory "$SMPROGRAMS\\{self.APP_NAME}"
+                CreateDirectory "$SMPROGRAMS\\{self.APP_SLUG}"
                 SetOutPath "$INSTDIR"
-                CreateShortCut "$SMPROGRAMS\\{self.APP_NAME}\\{self.APP_NAME}.lnk" \\
+                CreateShortCut "$SMPROGRAMS\\{self.APP_SLUG}\\{self.APP_NAME}.lnk" \\
                     "$INSTDIR\\.venv\\pythonw.exe" "launcher.pyw" \\
                     {"$INSTDIR\\icon.ico" if has_icon else ""}
-                CreateShortCut "$SMPROGRAMS\\{self.APP_NAME}\\Uninstall.lnk" \\
+                CreateShortCut "$SMPROGRAMS\\{self.APP_SLUG}\\Uninstall.lnk" \\
                     "$INSTDIR\\Uninstall.exe"
 
                 ; Desktop shortcut — launch pythonw.exe directly (no console)
@@ -451,17 +453,17 @@ class InstallerBuilder:
                 RMDir /r "$INSTDIR"
 
                 ; Remove application data (databases, configs)
-                RMDir /r "$LOCALAPPDATA\\{self.APP_NAME}"
+                RMDir /r "$LOCALAPPDATA\\{self.APP_SLUG}"
 
                 ; Remove shortcuts
-                Delete "$SMPROGRAMS\\{self.APP_NAME}\\{self.APP_NAME}.lnk"
-                Delete "$SMPROGRAMS\\{self.APP_NAME}\\Uninstall.lnk"
-                RMDir  "$SMPROGRAMS\\{self.APP_NAME}"
+                Delete "$SMPROGRAMS\\{self.APP_SLUG}\\{self.APP_NAME}.lnk"
+                Delete "$SMPROGRAMS\\{self.APP_SLUG}\\Uninstall.lnk"
+                RMDir  "$SMPROGRAMS\\{self.APP_SLUG}"
                 Delete "$DESKTOP\\{self.APP_NAME}.lnk"
 
                 ; Remove registry
-                DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_NAME}"
-                DeleteRegKey HKCU "Software\\{self.APP_NAME}"
+                DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{self.APP_SLUG}"
+                DeleteRegKey HKCU "Software\\{self.APP_SLUG}"
             SectionEnd
         """)
 

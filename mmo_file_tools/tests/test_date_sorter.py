@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from file_tools.tools.date_sorter import DateSorter
+from mmo_file_tools.tools.date_sorter import DateSorter
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Tests for the FastAPI application (file_tools.main)."""
+"""Tests for the FastAPI application (mmo_file_tools.main)."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 
-from file_tools import main as main_module
-from file_tools.main import app, set_webview_window
+from mmo_file_tools import main as main_module
+from mmo_file_tools.main import app, set_webview_window
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def test_root_returns_html(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    assert b"FileTools" in r.content
+    assert b"MMO FileTools" in r.content
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def test_pdf_merge_single_file(client: TestClient) -> None:
 
 def test_pdf_merge_corrupted_file(client: TestClient) -> None:
     """merge_pdfs raises on corrupt input â€“ backend should return 500."""
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=Exception("corrupt PDF")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=Exception("corrupt PDF")):
         r = client.post(
             "/api/pdf/merge",
             files=[
@@ -109,7 +109,7 @@ def test_pdf_merge_corrupted_file(client: TestClient) -> None:
 
 def test_pdf_merge_permission_error(client: TestClient) -> None:
     """merge_pdfs raises PermissionError â€“ backend should return 422."""
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=PermissionError("locked")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=PermissionError("locked")):
         r = client.post(
             "/api/pdf/merge",
             files=[
@@ -211,7 +211,7 @@ def test_pdf_split_invalid_ranges(client: TestClient) -> None:
 def test_pdf_split_corrupted_file(client: TestClient) -> None:
     """split_pdf raises on corrupt input â€“ backend should return 500."""
     pdf = _make_pdf_bytes(1)
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=Exception("corrupt")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=Exception("corrupt")):
         r = client.post(
             "/api/pdf/split",
             data={"ranges": "1"},
@@ -224,7 +224,7 @@ def test_pdf_split_corrupted_file(client: TestClient) -> None:
 def test_pdf_split_permission_error(client: TestClient) -> None:
     """split_pdf raises PermissionError â€“ backend should return 422."""
     pdf = _make_pdf_bytes(1)
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=PermissionError("no access")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=PermissionError("no access")):
         r = client.post(
             "/api/pdf/split",
             data={"ranges": "1"},
@@ -371,7 +371,7 @@ def test_dedup_scan_invalid_dir(client: TestClient) -> None:
 def test_dedup_delete_file(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "todel.txt"
     f.write_text("bye")
-    with patch("file_tools.tools.dedup_scanner.DedupScanner.delete_path"):
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner.delete_path"):
         r = client.post(
             "/api/dedup/delete",
             json={"path": str(f), "is_dir": False},
@@ -383,7 +383,7 @@ def test_dedup_delete_directory(client: TestClient, tmp_path: Path) -> None:
     d = tmp_path / "todel_dir"
     d.mkdir()
     (d / "child.txt").write_text("x")
-    with patch("file_tools.tools.dedup_scanner.DedupScanner.delete_path"):
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner.delete_path"):
         r = client.post(
             "/api/dedup/delete",
             json={"path": str(d), "is_dir": True},
@@ -414,7 +414,7 @@ def test_dedup_delete_nonexistent_dir(client: TestClient) -> None:
 
 def test_dir_compare_deleted_mid_operation(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
     """compare_directories raises FileNotFoundError if a dir disappears."""
-    with patch("file_tools.tools.dir_compare.compare_directories", side_effect=FileNotFoundError("src gone")):
+    with patch("mmo_file_tools.tools.dir_compare.compare_directories", side_effect=FileNotFoundError("src gone")):
         r = client.post(
             "/api/dir/compare",
             data={"source": str(src_dir), "target": str(tgt_dir)},
@@ -425,7 +425,7 @@ def test_dir_compare_deleted_mid_operation(client: TestClient, src_dir: Path, tg
 
 def test_dir_compare_os_error(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
     """compare_directories raises OSError if a dir is unreadable."""
-    with patch("file_tools.tools.dir_compare.compare_directories", side_effect=OSError("access denied")):
+    with patch("mmo_file_tools.tools.dir_compare.compare_directories", side_effect=OSError("access denied")):
         r = client.post(
             "/api/dir/compare",
             data={"source": str(src_dir), "target": str(tgt_dir)},
@@ -436,7 +436,7 @@ def test_dir_compare_os_error(client: TestClient, src_dir: Path, tgt_dir: Path) 
 
 def test_dir_sync_file_deleted(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
     """sync_directories raises FileNotFoundError when a file vanishes."""
-    with patch("file_tools.tools.dir_compare.sync_directories", side_effect=FileNotFoundError("a.txt gone")):
+    with patch("mmo_file_tools.tools.dir_compare.sync_directories", side_effect=FileNotFoundError("a.txt gone")):
         r = client.post(
             "/api/dir/sync",
             data={"source": str(src_dir), "target": str(tgt_dir), "files": "a.txt"},
@@ -447,7 +447,7 @@ def test_dir_sync_file_deleted(client: TestClient, src_dir: Path, tgt_dir: Path)
 
 def test_dir_sync_permission_error(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
     """sync_directories raises PermissionError if target is not writable."""
-    with patch("file_tools.tools.dir_compare.sync_directories", side_effect=PermissionError("read-only")):
+    with patch("mmo_file_tools.tools.dir_compare.sync_directories", side_effect=PermissionError("read-only")):
         r = client.post(
             "/api/dir/sync",
             data={"source": str(src_dir), "target": str(tgt_dir), "files": "a.txt"},
@@ -458,7 +458,7 @@ def test_dir_sync_permission_error(client: TestClient, src_dir: Path, tgt_dir: P
 
 def test_dir_sync_os_error(client: TestClient, src_dir: Path, tgt_dir: Path) -> None:
     """sync_directories raises OSError for generic I/O issues."""
-    with patch("file_tools.tools.dir_compare.sync_directories", side_effect=OSError("disk full")):
+    with patch("mmo_file_tools.tools.dir_compare.sync_directories", side_effect=OSError("disk full")):
         r = client.post(
             "/api/dir/sync",
             data={"source": str(src_dir), "target": str(tgt_dir)},
@@ -471,7 +471,7 @@ def test_dedup_scan_dir_deleted(client: TestClient, tmp_path: Path) -> None:
     """DedupScanner.scan() raises FileNotFoundError if dir is removed."""
     root = tmp_path / "vanishing"
     root.mkdir()
-    with patch("file_tools.tools.dedup_scanner.DedupScanner") as mock_cls:
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner") as mock_cls:
         mock_cls.return_value.scan.side_effect = FileNotFoundError("gone")
         r = client.post("/api/dedup/scan", json={"directory": str(root)})
     assert r.status_code == 200
@@ -481,7 +481,7 @@ def test_dedup_scan_dir_deleted(client: TestClient, tmp_path: Path) -> None:
 def test_dedup_scan_permission_error(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "locked"
     root.mkdir()
-    with patch("file_tools.tools.dedup_scanner.DedupScanner") as mock_cls:
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner") as mock_cls:
         mock_cls.return_value.scan.side_effect = PermissionError("no access")
         r = client.post("/api/dedup/scan", json={"directory": str(root)})
     assert r.status_code == 200
@@ -492,7 +492,7 @@ def test_dedup_delete_race_condition(client: TestClient, tmp_path: Path) -> None
     """File passes existence check but is deleted before delete_path runs."""
     f = tmp_path / "race.txt"
     f.write_text("temp")
-    with patch("file_tools.tools.dedup_scanner.DedupScanner.delete_path", side_effect=FileNotFoundError("gone")):
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner.delete_path", side_effect=FileNotFoundError("gone")):
         r = client.post("/api/dedup/delete", json={"path": str(f), "is_dir": False})
     assert r.status_code == 404
     assert "no longer exists" in r.json()["detail"].lower()
@@ -501,7 +501,7 @@ def test_dedup_delete_race_condition(client: TestClient, tmp_path: Path) -> None
 def test_dedup_delete_permission_denied(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "locked.txt"
     f.write_text("locked")
-    with patch("file_tools.tools.dedup_scanner.DedupScanner.delete_path", side_effect=PermissionError("denied")):
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner.delete_path", side_effect=PermissionError("denied")):
         r = client.post("/api/dedup/delete", json={"path": str(f), "is_dir": False})
     assert r.status_code == 422
     assert "permission denied" in r.json()["detail"].lower()
@@ -514,7 +514,7 @@ def test_split_to_folder_file_deleted(client: TestClient, tmp_path: Path) -> Non
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=FileNotFoundError("gone")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=FileNotFoundError("gone")):
         r = client.post(
             "/api/pdf/split-to-folder",
             json={
@@ -662,7 +662,7 @@ def test_set_webview_window_updates_module() -> None:
 
 
 def test_pdf2dcm_tags(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.common_tags.return_value = [
             {"keyword": "PatientName", "label": "Patient Name", "default": ""},
         ]
@@ -677,7 +677,7 @@ def test_pdf2dcm_convert(client: TestClient, tmp_path: Path) -> None:
     pdf = tmp_path / "test.pdf"
     pdf.write_bytes(b"%PDF-1.4 minimal")
 
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.return_value = b"DICOM_DATA"
         with open(pdf, "rb") as f:
             r = client.post(
@@ -698,7 +698,7 @@ def test_pdf2dcm_convert_with_template(
     tmpl = tmp_path / "tmpl.dcm"
     tmpl.write_bytes(b"DICOM TEMPLATE")
 
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.return_value = b"DCM_WITH_TMPL"
         with open(pdf, "rb") as fp, open(tmpl, "rb") as ft:
             r = client.post(
@@ -742,7 +742,7 @@ def test_pdf2dcm_convert_desktop(client: TestClient, tmp_path: Path) -> None:
     pdf.write_bytes(b"%PDF-1.4 data")
     output = tmp_path / "output.dcm"
 
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.return_value = b"DCM_DESKTOP"
         r = client.post(
             "/api/pdf2dcm/convert-desktop",
@@ -776,7 +776,7 @@ def test_pdf2dcm_convert_desktop_missing_output(client: TestClient) -> None:
 def test_pdf2dcm_convert_desktop_file_not_found(
     client: TestClient,
 ) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.side_effect = FileNotFoundError("not found")
         r = client.post(
             "/api/pdf2dcm/convert-desktop",
@@ -791,7 +791,7 @@ def test_pdf2dcm_convert_desktop_file_not_found(
 def test_pdf2dcm_convert_desktop_conversion_error(
     client: TestClient,
 ) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.side_effect = RuntimeError("conversion error")
         r = client.post(
             "/api/pdf2dcm/convert-desktop",
@@ -807,7 +807,7 @@ def test_pdf2dcm_convert_desktop_conversion_error(
 
 
 def test_pdf2dcm_configs_empty(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.return_value.get_configs.return_value = []
         r = client.get("/api/pdf2dcm/configs")
     assert r.status_code == 200
@@ -815,7 +815,7 @@ def test_pdf2dcm_configs_empty(client: TestClient) -> None:
 
 
 def test_pdf2dcm_configs_list(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.return_value.get_configs.return_value = [
             {"id": 1, "name": "mbits", "tags": {"PatientName": "mbits"}},
         ]
@@ -827,7 +827,7 @@ def test_pdf2dcm_configs_list(client: TestClient) -> None:
 
 
 def test_pdf2dcm_save_config(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.return_value.save_config.return_value = {
             "id": 1, "name": "test", "tags": {"PatientID": "123"},
         }
@@ -848,7 +848,7 @@ def test_pdf2dcm_save_config_empty_name(client: TestClient) -> None:
 
 
 def test_pdf2dcm_delete_config(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.return_value.delete_config.return_value = True
         r = client.delete("/api/pdf2dcm/configs/1")
     assert r.status_code == 200
@@ -856,7 +856,7 @@ def test_pdf2dcm_delete_config(client: TestClient) -> None:
 
 
 def test_pdf2dcm_delete_config_not_found(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.return_value.delete_config.return_value = False
         r = client.delete("/api/pdf2dcm/configs/999")
     assert r.status_code == 404
@@ -867,8 +867,8 @@ def test_pdf2dcm_delete_config_not_found(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 def test_run_web_calls_uvicorn() -> None:
-    with patch("file_tools.main.uvicorn.run") as mock_run:
-        from file_tools.main import run_web
+    with patch("mmo_file_tools.main.uvicorn.run") as mock_run:
+        from mmo_file_tools.main import run_web
         run_web(host="0.0.0.0", port=9999)
         mock_run.assert_called_once_with(app, host="0.0.0.0", port=9999)
 
@@ -879,7 +879,7 @@ def test_run_web_calls_uvicorn() -> None:
 
 
 def test_pdf_merge_value_error(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=ValueError("bad")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=ValueError("bad")):
         r = client.post(
             "/api/pdf/merge",
             files=[("files", ("a.pdf", b"fake", "application/pdf"))],
@@ -889,7 +889,7 @@ def test_pdf_merge_value_error(client: TestClient) -> None:
 
 
 def test_pdf_merge_os_error(client: TestClient) -> None:
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=OSError("disk")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=OSError("disk")):
         r = client.post(
             "/api/pdf/merge",
             files=[("files", ("a.pdf", b"fake", "application/pdf"))],
@@ -914,7 +914,7 @@ def test_pdf_merge_by_path_empty_paths(client: TestClient) -> None:
 def test_pdf_merge_by_path_value_error(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "a.pdf"
     f.write_bytes(_make_pdf_bytes(1))
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=ValueError("bad")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=ValueError("bad")):
         r = client.post(
             "/api/pdf/merge-by-path",
             data={"file_paths": str(f)},
@@ -926,7 +926,7 @@ def test_pdf_merge_by_path_value_error(client: TestClient, tmp_path: Path) -> No
 def test_pdf_merge_by_path_permission_error(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "a.pdf"
     f.write_bytes(_make_pdf_bytes(1))
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=PermissionError("locked")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=PermissionError("locked")):
         r = client.post(
             "/api/pdf/merge-by-path",
             data={"file_paths": str(f)},
@@ -938,7 +938,7 @@ def test_pdf_merge_by_path_permission_error(client: TestClient, tmp_path: Path) 
 def test_pdf_merge_by_path_os_error(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "a.pdf"
     f.write_bytes(_make_pdf_bytes(1))
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=OSError("disk")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=OSError("disk")):
         r = client.post(
             "/api/pdf/merge-by-path",
             data={"file_paths": str(f)},
@@ -950,7 +950,7 @@ def test_pdf_merge_by_path_os_error(client: TestClient, tmp_path: Path) -> None:
 def test_pdf_merge_by_path_generic_error(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "a.pdf"
     f.write_bytes(_make_pdf_bytes(1))
-    with patch("file_tools.tools.pdf_tools.merge_pdfs", side_effect=RuntimeError("unexpected")):
+    with patch("mmo_file_tools.tools.pdf_tools.merge_pdfs", side_effect=RuntimeError("unexpected")):
         r = client.post(
             "/api/pdf/merge-by-path",
             data={"file_paths": str(f)},
@@ -1005,7 +1005,7 @@ def test_pdf_split_jpeg_output(client: TestClient) -> None:
 
 def test_pdf_split_os_error(client: TestClient) -> None:
     pdf = _make_pdf_bytes(1)
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=OSError("disk")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=OSError("disk")):
         r = client.post(
             "/api/pdf/split",
             data={"ranges": "1"},
@@ -1017,7 +1017,7 @@ def test_pdf_split_os_error(client: TestClient) -> None:
 
 def test_pdf_split_generic_error(client: TestClient) -> None:
     pdf = _make_pdf_bytes(1)
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=RuntimeError("boom")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=RuntimeError("boom")):
         r = client.post(
             "/api/pdf/split",
             data={"ranges": "1"},
@@ -1029,7 +1029,7 @@ def test_pdf_split_generic_error(client: TestClient) -> None:
 
 def test_pdf_split_value_error(client: TestClient) -> None:
     pdf = _make_pdf_bytes(1)
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=ValueError("bad range")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=ValueError("bad range")):
         r = client.post(
             "/api/pdf/split",
             data={"ranges": "1"},
@@ -1147,7 +1147,7 @@ def test_split_to_folder_permission_error(client: TestClient, tmp_path: Path) ->
     pdf.write_bytes(_make_pdf_bytes(1))
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=PermissionError("denied")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=PermissionError("denied")):
         r = client.post(
             "/api/pdf/split-to-folder",
             json={
@@ -1165,7 +1165,7 @@ def test_split_to_folder_os_error(client: TestClient, tmp_path: Path) -> None:
     pdf.write_bytes(_make_pdf_bytes(1))
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    with patch("file_tools.tools.pdf_tools.split_pdf", side_effect=OSError("disk")):
+    with patch("mmo_file_tools.tools.pdf_tools.split_pdf", side_effect=OSError("disk")):
         r = client.post(
             "/api/pdf/split-to-folder",
             json={
@@ -1185,7 +1185,7 @@ def test_split_to_folder_os_error(client: TestClient, tmp_path: Path) -> None:
 def test_dedup_delete_os_error(client: TestClient, tmp_path: Path) -> None:
     f = tmp_path / "file.txt"
     f.write_text("x")
-    with patch("file_tools.tools.dedup_scanner.DedupScanner.delete_path", side_effect=OSError("fail")):
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner.delete_path", side_effect=OSError("fail")):
         r = client.post(
             "/api/dedup/delete",
             json={"path": str(f), "is_dir": False},
@@ -1197,7 +1197,7 @@ def test_dedup_delete_os_error(client: TestClient, tmp_path: Path) -> None:
 def test_dedup_scan_os_error(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "d"
     root.mkdir()
-    with patch("file_tools.tools.dedup_scanner.DedupScanner") as mock_cls:
+    with patch("mmo_file_tools.tools.dedup_scanner.DedupScanner") as mock_cls:
         mock_cls.return_value.scan.side_effect = OSError("fail")
         r = client.post("/api/dedup/scan", json={"directory": str(root)})
     assert r.status_code == 200
@@ -1228,7 +1228,7 @@ def test_date_sort_preview_not_a_dir(client: TestClient) -> None:
 def test_date_sort_preview_file_not_found(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "d"
     root.mkdir()
-    with patch("file_tools.tools.date_sorter.DateSorter") as mock_cls:
+    with patch("mmo_file_tools.tools.date_sorter.DateSorter") as mock_cls:
         mock_cls.return_value.preview.side_effect = FileNotFoundError("gone")
         r = client.post("/api/date-sort/preview", json={"directory": str(root)})
     assert r.status_code == 422
@@ -1237,7 +1237,7 @@ def test_date_sort_preview_file_not_found(client: TestClient, tmp_path: Path) ->
 def test_date_sort_preview_permission_error(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "d"
     root.mkdir()
-    with patch("file_tools.tools.date_sorter.DateSorter") as mock_cls:
+    with patch("mmo_file_tools.tools.date_sorter.DateSorter") as mock_cls:
         mock_cls.return_value.preview.side_effect = PermissionError("no access")
         r = client.post("/api/date-sort/preview", json={"directory": str(root)})
     assert r.status_code == 422
@@ -1247,7 +1247,7 @@ def test_date_sort_preview_permission_error(client: TestClient, tmp_path: Path) 
 def test_date_sort_preview_os_error(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "d"
     root.mkdir()
-    with patch("file_tools.tools.date_sorter.DateSorter") as mock_cls:
+    with patch("mmo_file_tools.tools.date_sorter.DateSorter") as mock_cls:
         mock_cls.return_value.preview.side_effect = OSError("io error")
         r = client.post("/api/date-sort/preview", json={"directory": str(root)})
     assert r.status_code == 422
@@ -1272,7 +1272,7 @@ def test_date_sort_execute_empty_plan(client: TestClient) -> None:
 
 
 def test_date_sort_execute_permission_error(client: TestClient) -> None:
-    with patch("file_tools.tools.date_sorter.DateSorter") as mock_cls:
+    with patch("mmo_file_tools.tools.date_sorter.DateSorter") as mock_cls:
         mock_cls.return_value.execute.side_effect = PermissionError("no access")
         r = client.post("/api/date-sort/execute", json={"plan": [{"file": "a"}]})
     assert r.status_code == 422
@@ -1280,7 +1280,7 @@ def test_date_sort_execute_permission_error(client: TestClient) -> None:
 
 
 def test_date_sort_execute_os_error(client: TestClient) -> None:
-    with patch("file_tools.tools.date_sorter.DateSorter") as mock_cls:
+    with patch("mmo_file_tools.tools.date_sorter.DateSorter") as mock_cls:
         mock_cls.return_value.execute.side_effect = OSError("disk full")
         r = client.post("/api/date-sort/execute", json={"plan": [{"file": "a"}]})
     assert r.status_code == 422
@@ -1295,7 +1295,7 @@ def test_date_sort_execute_os_error(client: TestClient) -> None:
 def test_pdf2dcm_convert_file_not_found(client: TestClient, tmp_path: Path) -> None:
     pdf = tmp_path / "test.pdf"
     pdf.write_bytes(b"%PDF-1.4 data")
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.side_effect = FileNotFoundError("not found")
         with open(pdf, "rb") as f:
             r = client.post(
@@ -1309,7 +1309,7 @@ def test_pdf2dcm_convert_file_not_found(client: TestClient, tmp_path: Path) -> N
 def test_pdf2dcm_convert_generic_error(client: TestClient, tmp_path: Path) -> None:
     pdf = tmp_path / "test.pdf"
     pdf.write_bytes(b"%PDF-1.4 data")
-    with patch("file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
+    with patch("mmo_file_tools.tools.pdf2dcm.Pdf2Dcm") as MockPdf2Dcm:
         MockPdf2Dcm.convert.side_effect = RuntimeError("unexpected")
         with open(pdf, "rb") as f:
             r = client.post(
@@ -1621,7 +1621,7 @@ def test_image_shrink_by_path_invalid_params(client: TestClient, tmp_path: Path)
 
 def test_image_shrink_by_path_generic_error(client: TestClient, tmp_path: Path) -> None:
     p = _make_test_image(tmp_path / "photo.jpg")
-    with patch("file_tools.tools.image_shrinker.ImageShrinker.shrink", side_effect=RuntimeError("boom")):
+    with patch("mmo_file_tools.tools.image_shrinker.ImageShrinker.shrink", side_effect=RuntimeError("boom")):
         r = client.post(
             "/api/image/shrink-by-path",
             data={"file_paths": str(p), "scale_percent": 50, "max_width": 0, "max_height": 0},
@@ -1656,7 +1656,7 @@ def test_image_shrink_upload_invalid_params(client: TestClient, tmp_path: Path) 
 
 def test_image_shrink_upload_generic_error(client: TestClient, tmp_path: Path) -> None:
     p = _make_test_image(tmp_path / "photo.jpg")
-    with patch("file_tools.tools.image_shrinker.ImageShrinker.shrink", side_effect=RuntimeError("boom")):
+    with patch("mmo_file_tools.tools.image_shrinker.ImageShrinker.shrink", side_effect=RuntimeError("boom")):
         with open(p, "rb") as f:
             r = client.post(
                 "/api/image/shrink",

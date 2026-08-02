@@ -80,9 +80,9 @@ class Pdf2Dcm:
 
     def __init__(self, db_url: str | None = None) -> None:
         if db_url is None:
-            db_dir = Path(user_data_dir("FileTools", appauthor=False))
+            db_dir = Path(user_data_dir("mmo_file_tools", appauthor=False))
             db_dir.mkdir(parents=True, exist_ok=True)
-            db_path = db_dir / "filetools_pdf2dcm.db"
+            db_path = db_dir / "mmo_file_tools_pdf2dcm.db"
             db_url = f"sqlite:///{db_path}"
         self._engine = create_engine(
             db_url, connect_args={"timeout": 30}, pool_pre_ping=True,
