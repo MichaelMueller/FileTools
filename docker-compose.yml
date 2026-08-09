@@ -1,0 +1,216 @@
+# MMO FileTools — web mode via Docker Compose.
+#
+# Profiles are selected with COMPOSE_PROFILES in .env:
+#
+#   open                    -> app published directly, NO authentication
+#   auth,p-<slug>[,p-<slug>] -> app has no published port; each p-<slug> adds one
+#                              oauth2-proxy instance for one OIDC provider, with
+#                              its own port, user whitelist and domain whitelist
+#
+# Example: COMPOSE_PROFILES=auth,p-mbits,p-kunde-a
+#
+# In auth mode the app itself publishes no port at all, so there is no way to
+# bypass the proxies from outside the Docker network.
+
+name: mmo-file-tools
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      APP_UID: ${APP_UID:-1000}
+      APP_GID: ${APP_GID:-1000}
+  image: mmo-file-tools:${MMO_TAG:-1.5.0}
+  restart: unless-stopped
+  init: true
+  environment:
+    TZ: ${TZ:-Europe/Berlin}
+  volumes:
+    # Persists the dedup scan cache (SQLite via platformdirs) across restarts.
+    - mmo-appdata:/home/app/.local/share
+    # Working directory for the path-based tools (Dir Compare, Dedup, Date
+    # Sorter). Only needed if you actually use those — see README. Point
+    # MMO_DATA_DIR at a real directory to enable them.
+    - ${MMO_DATA_DIR:-./data}:/data
+
+# Everything identical across all oauth2-proxy instances.
+x-oauth2-service: &oauth2-service
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+  restart: unless-stopped
+  depends_on:
+    app-protected:
+      condition: service_healthy
+    auth-emails:
+      condition: service_completed_successfully
+
+x-oauth2-env: &oauth2-env
+  OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+  OAUTH2_PROXY_UPSTREAMS: http://app-protected:8000
+  OAUTH2_PROXY_REVERSE_PROXY: "true"
+  OAUTH2_PROXY_PROVIDER: oidc
+  OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+  OAUTH2_PROXY_SESSION_STORE_TYPE: cookie
+  OAUTH2_PROXY_COOKIE_SAMESITE: lax
+  OAUTH2_PROXY_COOKIE_EXPIRE: ${OIDC_COOKIE_EXPIRE:-168h}
+  # Must be false when serving over plain http:// (e.g. localhost).
+  OAUTH2_PROXY_COOKIE_SECURE: ${OIDC_COOKIE_SECURE:-false}
+  # Go straight to the provider instead of showing a "Sign in with…" page.
+  OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+  # The frontend talks to /api/* with fetch(). Answer those with 401 rather than
+  # a redirect to the provider, which fetch() cannot follow (CORS).
+  OAUTH2_PROXY_API_ROUTES: ^/api/
+  # The dedup scanner streams Server-Sent Events; the 1s default flush interval
+  # would stall progress updates.
+  OAUTH2_PROXY_FLUSH_INTERVAL: 100ms
+
+services:
+  # ---------------------------------------------------------------------------
+  # Unprotected: published straight to the host.
+  # ---------------------------------------------------------------------------
+  app:
+    <<: *app-base
+    profiles: ["open"]
+    container_name: mmo-file-tools
+    ports:
+      - "${MMO_BIND:-127.0.0.1}:${MMO_PORT:-6080}:8000"
+
+  # ---------------------------------------------------------------------------
+  # Protected: internal only, fronted by one oauth2-proxy per provider.
+  # ---------------------------------------------------------------------------
+  app-protected:
+    <<: *app-base
+    profiles: ["auth"]
+    container_name: mmo-file-tools-app
+    expose:
+      - "8000"
+
+  # oauth2-proxy can only read its user whitelist from a file, so turn the
+  # OIDC_<SLUG>_ALLOWED_EMAILS variables into one file per provider on a shared
+  # volume before the proxies start. Providers are discovered from the
+  # environment, so adding one only means editing .env — no change here.
+  #
+  # Reads the whole env file (that is how it discovers providers); it only ever
+  # greps ALLOWED_EMAILS / ALLOWED_DOMAINS out of it.
+  auth-emails:
+    profiles: ["auth"]
+    image: busybox:1.37
+    container_name: mmo-file-tools-auth-emails
+    restart: "no"
+    env_file:
+      - ${MMO_ENV_FILE:-.env}
+    volumes:
+      - auth-emails:/emails
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        prefixes=$$( { env | sed -n 's/^\(OIDC_[A-Z0-9_]\{1,\}\)_ALLOWED_EMAILS=.*/\1/p'
+                       env | sed -n 's/^\(OIDC_[A-Z0-9_]\{1,\}\)_ALLOWED_DOMAINS=.*/\1/p'
+                     } | sort -u )
+        if [ -z "$$prefixes" ]; then
+          echo "No OIDC_<SLUG>_ALLOWED_EMAILS / _ALLOWED_DOMAINS found in the env file." >&2
+          exit 1
+        fi
+        for prefix in $$prefixes; do
+          slug=$${prefix#OIDC_}
+          emails=$$(env | sed -n "s/^$${prefix}_ALLOWED_EMAILS=//p")
+          domains=$$(env | sed -n "s/^$${prefix}_ALLOWED_DOMAINS=//p")
+
+          # "*" would admit every account of that provider and silently make the
+          # user whitelist meaningless, because oauth2-proxy ORs the two rules.
+          case "$$domains" in
+            *"*"*)
+              echo "$$slug: '*' is not allowed in ALLOWED_DOMAINS — it would admit every account at that provider and make the user list meaningless." >&2
+              exit 1 ;;
+          esac
+
+          printf '%s\n' "$$emails" \
+            | tr ',;[:space:]' '\n\n\n\n' \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -e '/^$$/d' \
+            > "/emails/$$slug"
+          n=$$(wc -l < "/emails/$$slug")
+          d=$$(printf '%s' "$$domains" | tr -d '[:space:]')
+
+          # Mirrors oauth2-proxy's own requirement: it refuses to start unless at
+          # least one of the two rules is present.
+          if [ "$$n" -eq 0 ] && [ -z "$$d" ]; then
+            echo "$$slug: neither ALLOWED_EMAILS nor ALLOWED_DOMAINS is set — nobody could log in." >&2
+            exit 1
+          fi
+          echo "$$slug: $$n user(s), domains: $${d:-none}"
+        done
+
+  # ---------------------------------------------------------------------------
+  # One block per OIDC provider. To add another, copy a block, change the slug
+  # in the service name / container_name / EMAILS_FILE / COOKIE_NAME and the
+  # OIDC_<SLUG>_* variables, then add its profile to COMPOSE_PROFILES.
+  # ---------------------------------------------------------------------------
+  oauth2-proxy-mbits:
+    <<: *oauth2-service
+    profiles: ["p-mbits"]
+    container_name: mmo-file-tools-auth-mbits
+    ports:
+      - "${MMO_BIND:-0.0.0.0}:${OIDC_MBITS_PORT:-6080}:4180"
+    environment:
+      <<: *oauth2-env
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_MBITS_ISSUER_URL:-}
+      OAUTH2_PROXY_CLIENT_ID: ${OIDC_MBITS_CLIENT_ID:-}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_MBITS_CLIENT_SECRET:-}
+      OAUTH2_PROXY_REDIRECT_URL: ${OIDC_MBITS_REDIRECT_URL:-}
+      OAUTH2_PROXY_SCOPE: ${OIDC_MBITS_SCOPE:-openid email profile}
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${OIDC_MBITS_ALLOWED_DOMAINS:-}
+      OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE: /emails/MBITS
+      OAUTH2_PROXY_COOKIE_SECRET: ${OIDC_MBITS_COOKIE_SECRET:-}
+      OAUTH2_PROXY_COOKIE_NAME: _oauth2_proxy_mbits
+      OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: ${OIDC_MBITS_ALLOW_UNVERIFIED_EMAIL:-false}
+    volumes:
+      - auth-emails:/emails:ro
+
+  oauth2-proxy-kunde-a:
+    <<: *oauth2-service
+    profiles: ["p-kunde-a"]
+    container_name: mmo-file-tools-auth-kunde-a
+    ports:
+      - "${MMO_BIND:-0.0.0.0}:${OIDC_KUNDE_A_PORT:-6081}:4180"
+    environment:
+      <<: *oauth2-env
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_KUNDE_A_ISSUER_URL:-}
+      OAUTH2_PROXY_CLIENT_ID: ${OIDC_KUNDE_A_CLIENT_ID:-}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_KUNDE_A_CLIENT_SECRET:-}
+      OAUTH2_PROXY_REDIRECT_URL: ${OIDC_KUNDE_A_REDIRECT_URL:-}
+      OAUTH2_PROXY_SCOPE: ${OIDC_KUNDE_A_SCOPE:-openid email profile}
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${OIDC_KUNDE_A_ALLOWED_DOMAINS:-}
+      OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE: /emails/KUNDE_A
+      OAUTH2_PROXY_COOKIE_SECRET: ${OIDC_KUNDE_A_COOKIE_SECRET:-}
+      OAUTH2_PROXY_COOKIE_NAME: _oauth2_proxy_kunde_a
+      OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: ${OIDC_KUNDE_A_ALLOW_UNVERIFIED_EMAIL:-false}
+    volumes:
+      - auth-emails:/emails:ro
+
+  oauth2-proxy-kunde-b:
+    <<: *oauth2-service
+    profiles: ["p-kunde-b"]
+    container_name: mmo-file-tools-auth-kunde-b
+    ports:
+      - "${MMO_BIND:-0.0.0.0}:${OIDC_KUNDE_B_PORT:-6082}:4180"
+    environment:
+      <<: *oauth2-env
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_KUNDE_B_ISSUER_URL:-}
+      OAUTH2_PROXY_CLIENT_ID: ${OIDC_KUNDE_B_CLIENT_ID:-}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_KUNDE_B_CLIENT_SECRET:-}
+      OAUTH2_PROXY_REDIRECT_URL: ${OIDC_KUNDE_B_REDIRECT_URL:-}
+      OAUTH2_PROXY_SCOPE: ${OIDC_KUNDE_B_SCOPE:-openid email profile}
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${OIDC_KUNDE_B_ALLOWED_DOMAINS:-}
+      OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE: /emails/KUNDE_B
+      OAUTH2_PROXY_COOKIE_SECRET: ${OIDC_KUNDE_B_COOKIE_SECRET:-}
+      OAUTH2_PROXY_COOKIE_NAME: _oauth2_proxy_kunde_b
+      OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: ${OIDC_KUNDE_B_ALLOW_UNVERIFIED_EMAIL:-false}
+    volumes:
+      - auth-emails:/emails:ro
+
+volumes:
+  mmo-appdata:
+  auth-emails:

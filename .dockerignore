@@ -1,0 +1,19 @@
+# Keep the build context small — only pyproject.toml and mmo_file_tools/ are needed.
+.git
+.gitignore
+.github
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.pyc
+.coverage
+htmlcov
+build
+dist
+*.egg-info
+data
+docs
+.env
+.claude
+mmo_file_tools/tests
