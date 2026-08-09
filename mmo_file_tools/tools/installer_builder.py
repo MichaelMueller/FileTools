@@ -39,9 +39,15 @@ class InstallerBuilder:
     APP_NAME = "MMO FileTools"
     #: Filesystem/registry-safe form of :attr:`APP_NAME` (no spaces).
     APP_SLUG = "mmo_file_tools"
-    APP_VERSION = "1.4.0"
+    APP_VERSION = "1.5.0"
     APP_PUBLISHER = "Dr. Michael Müller"
     APP_EXE_NAME = "mmo_file_tools.bat"
+    #: Marker files the app/launcher use to tell the wrapper how startup went,
+    #: so the wrapper can close its window instead of waiting for the app to end.
+    _OK_MARKER = ".startup-ok"
+    _FAIL_MARKER = ".startup-failed"
+    #: Polls of ~1s the wrapper waits for one of those markers.
+    _STARTUP_TIMEOUT = 40
 
     def __init__(
         self,
@@ -65,6 +71,7 @@ class InstallerBuilder:
 
     def build(self) -> Path:
         """Run the full build pipeline and return the path to the ``.exe`` installer."""
+        self._check_base_is_redistributable()
         self._clean()
         self._create_staging()
         self._create_venv()
@@ -152,10 +159,23 @@ class InstallerBuilder:
         pip = self._staging / "app" / ".venv" / "Scripts" / "pip.exe"
         staging_sp = self._staging / "app" / ".venv" / "Lib" / "site-packages"
 
-        # Locate the project's development venv.
+        # Locate the environment to source packages from: the project's
+        # development venv if there is one, otherwise the interpreter running
+        # the build (e.g. a conda env). Mirrors the fallback in _create_venv –
+        # without it the build dies with WinError 2 on any non-.venv setup.
         dev_venv = self.project_root / ".venv"
         dev_python = dev_venv / "Scripts" / "python.exe"
-        dev_sp = dev_venv / "Lib" / "site-packages"
+        if dev_python.is_file():
+            dev_sp = dev_venv / "Lib" / "site-packages"
+        else:
+            dev_python = Path(self.python_exe)
+            dev_sp = Path(
+                subprocess.check_output(
+                    [str(dev_python), "-c",
+                     "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                    text=True,
+                ).strip(),
+            )
 
         # ── 1. Pre-seed pythonnet + transitive deps ──────────────────
         preseed_names: set[str] = set()
@@ -270,6 +290,31 @@ class InstallerBuilder:
         if cfg.exists():
             cfg.unlink()
 
+    def _check_base_is_redistributable(self) -> None:
+        """Refuse to build from a conda environment.
+
+        ``_make_venv_portable`` copies the runtime the way a python.org install
+        is laid out: root DLLs plus ``DLLs/`` and ``Lib/``.  A conda Python keeps
+        its shared libraries (``ffi-8.dll``, ``sqlite3.dll``, ``libssl``, …) in
+        ``Library/bin`` instead, so that copy silently omits them and the
+        installed app dies with ``ImportError: DLL load failed while importing
+        _ctypes``.  Fail here rather than ship a broken installer.
+        """
+        base = self._base_python_dir()
+        if (base / "conda-meta").is_dir():
+            msg = (
+                f"Cannot build a redistributable installer from the conda "
+                f"environment at {base}.\n"
+                f"conda keeps shared libraries in Library\\bin, which the "
+                f"portable runtime does not include, so the installed app would "
+                f"fail with 'DLL load failed while importing _ctypes'.\n"
+                f"Build from a python.org interpreter instead:\n"
+                f"    py -3.12 -m venv .venv\n"
+                f"    .venv\\Scripts\\python.exe -m pip install -e \".[dev]\"\n"
+                f"    .venv\\Scripts\\python.exe mmo_file_tools.py installer"
+            )
+            raise RuntimeError(msg)
+
     def _base_python_dir(self) -> Path:
         """Return the base Python installation directory.
 
@@ -314,61 +359,170 @@ class InstallerBuilder:
         )
 
     def _write_launcher(self) -> None:
-        """Write a batch launcher that starts the app from the portable venv."""
+        """Write the batch launchers and the error-safe Python launcher."""
         bat = self._staging / "app" / self.APP_EXE_NAME
-        # Write a simple batch for backward compatibility (launch from File Explorer)
+        # The shortcuts point at this wrapper rather than at pythonw.exe, and
+        # that is the whole point: it owns stderr *before* Python exists, and it
+        # outlives the child. So a failed interpreter init — which writes to
+        # stderr and dies before any of our code runs — still gets recorded, and
+        # a non-zero exit still produces something the user actually sees.
         bat.write_text(
             '@echo off\r\n'
+            'setlocal\r\n'
             'cd /d "%~dp0"\r\n'
-            '".venv\\pythonw.exe" launcher.pyw %*\r\n',
+            'if not exist "logs" mkdir "logs"\r\n'
+            'set "STARTUP=logs\\startup.log"\r\n'
+            f'set "OKMARK=logs\\{self._OK_MARKER}"\r\n'
+            f'set "FAILMARK=logs\\{self._FAIL_MARKER}"\r\n'
+            'rem Keep the log bounded - it is append-only across every launch.\r\n'
+            'for %%A in ("%STARTUP%") do if %%~zA GTR 1000000 del "%STARTUP%"\r\n'
+            'if exist "%OKMARK%" del "%OKMARK%"\r\n'
+            'if exist "%FAILMARK%" del "%FAILMARK%"\r\n'
+            'echo [%DATE% %TIME%] launching >>"%STARTUP%"\r\n'
+            'rem Tells the launcher that we will surface the log, so it does not\r\n'
+            'rem pop a second editor of its own.\r\n'
+            'set "MMO_WRAPPED=1"\r\n'
+            'rem Detached, so this window is not tied to the app lifetime - but\r\n'
+            'rem still with stderr redirected, which /B preserves. That is what\r\n'
+            'rem captures an interpreter that dies before any of our code runs.\r\n'
+            'start "" /B ".venv\\pythonw.exe" launcher.pyw %* 2>>"%STARTUP%"\r\n'
+            'rem Wait only until startup is decided, then close this window.\r\n'
+            'set /a TRIES=0\r\n'
+            ':mmo_wait\r\n'
+            'if exist "%OKMARK%" goto mmo_done\r\n'
+            'if exist "%FAILMARK%" goto mmo_failed\r\n'
+            'ping -n 2 127.0.0.1 >nul\r\n'
+            'set /a TRIES+=1\r\n'
+            f'if %TRIES% LSS {self._STARTUP_TIMEOUT} goto mmo_wait\r\n'
+            'echo [%DATE% %TIME%] no startup confirmation - app may have died '
+            'or hung >>"%STARTUP%"\r\n'
+            'goto mmo_show\r\n'
+            ':mmo_failed\r\n'
+            'echo [%DATE% %TIME%] launcher reported a startup failure >>"%STARTUP%"\r\n'
+            ':mmo_show\r\n'
+            'rem notepad.exe explicitly: ".log" often has no file association,\r\n'
+            'rem and then "start" silently shows nothing at all.\r\n'
+            'start "" notepad.exe "%STARTUP%"\r\n'
+            ':mmo_done\r\n',
             encoding="utf-8",
         )
 
-        # Write a Python launcher that executes the main entry-point and
-        # displays a MessageBox + writes a log file if an unhandled exception
-        # occurs.  Uses absolute paths so it works regardless of CWD.
+        # Console launcher for diagnosis: real stdout/stderr, faulthandler on,
+        # and the window stays open on failure.
+        debug_bat = self._staging / "app" / f"{self.APP_SLUG}-debug.bat"
+        debug_bat.write_text(
+            '@echo off\r\n'
+            'cd /d "%~dp0"\r\n'
+            f'echo Starting {self.APP_NAME} with console output.\r\n'
+            'echo.\r\n'
+            '".venv\\python.exe" -X faulthandler launcher.pyw %*\r\n'
+            'echo.\r\n'
+            'echo --- exit code: %ERRORLEVEL% ---\r\n'
+            'pause\r\n',
+            encoding="utf-8",
+        )
+
+        # Error-safe Python launcher. Everything here has to survive a partly
+        # broken runtime, because that is exactly when it matters.
         launcher = self._staging / "app" / "launcher.pyw"
         launcher.write_text(
-            '"""MMO FileTools launcher \u2014 error-safe wrapper around mmo_file_tools.py."""\n'
+            f'"""{self.APP_NAME} launcher \u2014 error-safe wrapper around {self.APP_SLUG}.py."""\n'
             '\n'
-            'import os, sys, traceback, runpy, datetime\n'
+            'import datetime\n'
+            'import os\n'
+            'import runpy\n'
+            'import sys\n'
+            'import traceback\n'
             '\n'
             '_APP_DIR = os.path.dirname(os.path.abspath(__file__))\n'
+            '_LOG_DIR = os.path.join(_APP_DIR, "logs")\n'
+            '_LOG = os.path.join(_LOG_DIR, "launcher.log")\n'
             '\n'
-            'def _show_error(msg):\n'
-            '    try:\n'
-            '        import ctypes\n'
-            '        ctypes.windll.user32.MessageBoxW(0, msg, "MMO FileTools - Error", 0x10)\n'
-            '    except Exception:\n'
-            '        pass\n'
             '\n'
             'def _log_error(tb):\n'
+            '    """Append the traceback plus enough context to debug a broken runtime."""\n'
             '    try:\n'
-            '        log = os.path.join(_APP_DIR, "mmo_file_tools-error.log")\n'
-            '        with open(log, "a", encoding="utf-8") as f:\n'
+            '        os.makedirs(_LOG_DIR, exist_ok=True)\n'
+            '        with open(_LOG, "a", encoding="utf-8") as f:\n'
             '            f.write("\\n--- " + datetime.datetime.now().isoformat() + " ---\\n")\n'
+            '            f.write("exe:      " + sys.executable + "\\n")\n'
+            '            f.write("version:  " + sys.version.replace("\\n", " ") + "\\n")\n'
+            '            f.write("cwd:      " + os.getcwd() + "\\n")\n'
+            '            f.write("sys.path: " + os.pathsep.join(sys.path) + "\\n\\n")\n'
             '            f.write(tb + "\\n")\n'
             '    except Exception:\n'
             '        pass\n'
+            '\n'
+            '\n'
+            'def _show_error(msg):\n'
+            '    """Tell the user something went wrong, without trusting ctypes.\n'
+            '\n'
+            '    A missing DLL breaks ctypes itself, and that is a likely reason to\n'
+            '    be here at all — so if the MessageBox cannot be shown, open the log\n'
+            '    file instead. Never leave the user with no feedback whatsoever.\n'
+            '    """\n'
+            '    try:\n'
+            '        import ctypes\n'
+            f'        ctypes.windll.user32.MessageBoxW(0, msg, "{self.APP_NAME} - Error", 0x10)\n'
+            '        return\n'
+            '    except Exception:\n'
+            '        pass\n'
+            '    # notepad.exe is always present and needs no file association,\n'
+            '    # unlike os.startfile on a ".log" file.\n'
+            '    try:\n'
+            '        import subprocess\n'
+            '        subprocess.Popen(["notepad.exe", _LOG])\n'
+            '        return\n'
+            '    except Exception:\n'
+            '        pass\n'
+            '    try:\n'
+            '        os.startfile(_LOG_DIR)\n'
+            '    except Exception:\n'
+            '        pass\n'
+            '\n'
             '\n'
             'def main():\n'
             '    os.chdir(_APP_DIR)\n'
             '    if _APP_DIR not in sys.path:\n'
             '        sys.path.insert(0, _APP_DIR)\n'
             '    try:\n'
+            '        import faulthandler\n'
+            '        os.makedirs(_LOG_DIR, exist_ok=True)\n'
+            '        faulthandler.enable(open(os.path.join(_LOG_DIR, "launcher-crash.log"), "a"))\n'
+            '    except Exception:\n'
+            '        pass\n'
+            '    try:\n'
             '        runpy.run_path(\n'
-            '            os.path.join(_APP_DIR, "mmo_file_tools.py"),\n'
+            f'            os.path.join(_APP_DIR, "{self.APP_SLUG}.py"),\n'
             '            run_name="__main__",\n'
             '        )\n'
-            '    except Exception:\n'
+            '    except SystemExit:\n'
+            '        raise\n'
+            '    except BaseException:\n'
             '        tb = traceback.format_exc()\n'
             '        _log_error(tb)\n'
-            '        _show_error(\n'
-            '            "MMO FileTools failed to start.\\n\\n"\n'
-            '            "Details written to:\\n"\n'
-            '            + os.path.join(_APP_DIR, "mmo_file_tools-error.log")\n'
-            '        )\n'
+            '        # Tells the wrapper to stop waiting and show the log now.\n'
+            '        try:\n'
+            '            os.makedirs(_LOG_DIR, exist_ok=True)\n'
+            f'            open(os.path.join(_LOG_DIR, "{self._FAIL_MARKER}"), "w").close()\n'
+            '        except Exception:\n'
+            '            pass\n'
+            '        # When started by the wrapper, stderr is redirected into\n'
+            '        # startup.log and the wrapper opens it on a non-zero exit —\n'
+            '        # so write there and let it do the reporting, rather than\n'
+            '        # opening a second editor on top of its one.\n'
+            '        try:\n'
+            '            if sys.stderr is not None:\n'
+            '                sys.stderr.write(tb)\n'
+            '        except Exception:\n'
+            '            pass\n'
+            '        if os.environ.get("MMO_WRAPPED") != "1":\n'
+            '            _show_error(\n'
+            f'                "{self.APP_NAME} failed to start.\\n\\n"\n'
+            '                "Details written to:\\n" + _LOG\n'
+            '            )\n'
             '        sys.exit(1)\n'
+            '\n'
             '\n'
             'if __name__ == "__main__":\n'
             '    main()\n',
@@ -414,6 +568,10 @@ class InstallerBuilder:
                 ; Copy the whole app directory
                 File /r "{self._staging / 'app'}\\*.*"
 
+                ; Log directory must exist up front so the "Open log folder"
+                ; shortcut works before the first launch.
+                CreateDirectory "$INSTDIR\\logs"
+
                 ; Write uninstaller
                 WriteUninstaller "$INSTDIR\\Uninstall.exe"
 
@@ -431,20 +589,27 @@ class InstallerBuilder:
                 ; Store install dir
                 WriteRegStr HKCU "Software\\{self.APP_SLUG}" "InstallDir" "$INSTDIR"
 
-                ; Start Menu shortcut — launch pythonw.exe directly (no console)
+                ; Shortcuts point at the wrapper, not at pythonw.exe: it owns
+                ; stderr before Python starts, so an interpreter that dies during
+                ; init still leaves a log and still tells the user. Started
+                ; minimised so the console is not in the way.
                 CreateDirectory "$SMPROGRAMS\\{self.APP_SLUG}"
                 SetOutPath "$INSTDIR"
                 CreateShortCut "$SMPROGRAMS\\{self.APP_SLUG}\\{self.APP_NAME}.lnk" \\
-                    "$INSTDIR\\.venv\\pythonw.exe" "launcher.pyw" \\
-                    {"$INSTDIR\\icon.ico" if has_icon else ""}
+                    "$INSTDIR\\{self.APP_EXE_NAME}" "" \\
+                    {'"$INSTDIR\\icon.ico" 0' if has_icon else '"" 0'} SW_SHOWMINIMIZED
+                CreateShortCut "$SMPROGRAMS\\{self.APP_SLUG}\\{self.APP_NAME} (Debug).lnk" \\
+                    "$INSTDIR\\{self.APP_SLUG}-debug.bat"
+                CreateShortCut "$SMPROGRAMS\\{self.APP_SLUG}\\Open log folder.lnk" \\
+                    "$INSTDIR\\logs"
                 CreateShortCut "$SMPROGRAMS\\{self.APP_SLUG}\\Uninstall.lnk" \\
                     "$INSTDIR\\Uninstall.exe"
 
-                ; Desktop shortcut — launch pythonw.exe directly (no console)
+                ; Desktop shortcut — same wrapper
                 SetOutPath "$INSTDIR"
                 CreateShortCut "$DESKTOP\\{self.APP_NAME}.lnk" \\
-                    "$INSTDIR\\.venv\\pythonw.exe" "launcher.pyw" \\
-                    {"$INSTDIR\\icon.ico" if has_icon else ""}
+                    "$INSTDIR\\{self.APP_EXE_NAME}" "" \\
+                    {'"$INSTDIR\\icon.ico" 0' if has_icon else '"" 0'} SW_SHOWMINIMIZED
             SectionEnd
 
             ; --- Uninstaller Section ---
@@ -457,6 +622,8 @@ class InstallerBuilder:
 
                 ; Remove shortcuts
                 Delete "$SMPROGRAMS\\{self.APP_SLUG}\\{self.APP_NAME}.lnk"
+                Delete "$SMPROGRAMS\\{self.APP_SLUG}\\{self.APP_NAME} (Debug).lnk"
+                Delete "$SMPROGRAMS\\{self.APP_SLUG}\\Open log folder.lnk"
                 Delete "$SMPROGRAMS\\{self.APP_SLUG}\\Uninstall.lnk"
                 RMDir  "$SMPROGRAMS\\{self.APP_SLUG}"
                 Delete "$DESKTOP\\{self.APP_NAME}.lnk"
@@ -475,7 +642,9 @@ class InstallerBuilder:
         subprocess.check_call(
             [str(self.nsis_path), "/V2", str(nsi_path)],
         )
-        installer = self._output / f"{self.APP_NAME}-{self.APP_VERSION}-Setup.exe"
+        # Must match the OutFile written by _write_nsis_script (APP_SLUG, not
+        # APP_NAME) – otherwise the build fails even though makensis succeeded.
+        installer = self._output / f"{self.APP_SLUG}-{self.APP_VERSION}-Setup.exe"
         if not installer.exists():
             msg = f"Expected installer at {installer} but it was not created."
             raise FileNotFoundError(msg)

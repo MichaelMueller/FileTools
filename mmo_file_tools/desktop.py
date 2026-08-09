@@ -11,11 +11,14 @@ from pathlib import Path
 import uvicorn
 import webview
 
+from mmo_file_tools.diagnostics import Diagnostics
 from mmo_file_tools.main import app, set_webview_window
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8765
 _PORT_ATTEMPTS = 5
+#: Seconds to wait for the webview window before dumping thread stacks.
+_WINDOW_TIMEOUT = 30.0
 
 
 def _port_available(host: str, port: int) -> bool:
@@ -93,17 +96,21 @@ def run_desktop(
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DrMichaelMueller.MmoFileTools")
 
     port = _find_port(host, port, _PORT_ATTEMPTS)
+    Diagnostics.breadcrumb(f"port selected: {port}")
 
     thread = threading.Thread(target=_run_server, args=(host, port), daemon=True)
     thread.start()
+    Diagnostics.breadcrumb("server thread started")
     # Wait until the server is actually accepting connections.
     try:
         _wait_for_server(host, port)
     except RuntimeError as exc:
+        Diagnostics.logger().error("server did not start: %s", exc)
         if sys.platform == "win32":
             import ctypes  # noqa: PLC0415
             ctypes.windll.user32.MessageBoxW(0, str(exc), "MMO FileTools – Startup Error", 0x10)
         raise
+    Diagnostics.breadcrumb("server accepting connections")
 
     _icon_path = str(Path(__file__).parent / "static" / "icon.ico")
     window = webview.create_window(
@@ -115,7 +122,14 @@ def run_desktop(
         text_select=True,
     )
 
+    Diagnostics.breadcrumb("webview window created")
+
     def _on_loaded() -> None:  # pragma: no cover – pywebview callback
+        # The window is up, so the hang watchdog armed below is no longer needed.
+        Diagnostics.clear_watchdog()
+        Diagnostics.breadcrumb("window loaded")
+        # Startup succeeded – lets the wrapper close its console window.
+        Diagnostics.mark_started()
         set_webview_window(window)
 
     def _set_icon_win32() -> None:  # pragma: no cover
@@ -205,22 +219,13 @@ def run_desktop(
     # to `mmo_file_tools-error.log` in the current working directory and show a
     # MessageBox so the user is aware of the failure.
     def _log_and_alert(msg: str, exc: Exception | None = None) -> None:  # pragma: no cover
-        try:
-            import ctypes
-            import traceback as _tb
-            # write traceback
-            log = Path.cwd() / "mmo_file_tools-error.log"
-            with open(log, "a", encoding="utf-8") as f:
-                f.write(msg + "\n")
-                if exc is not None:
-                    f.write(_tb.format_exc())
-                    f.write("\n")
-        except Exception:
-            pass
-        try:
-            ctypes.windll.user32.MessageBoxW(0, msg, "MMO FileTools - Error", 0x10)
-        except Exception:
-            pass
+        Diagnostics.logger().critical(msg, exc_info=exc)
+        Diagnostics.notify(msg)
+
+    # If the window never loads, _on_loaded never clears this and the watchdog
+    # dumps every thread stack — the only way to diagnose a silent hang.
+    Diagnostics.start_watchdog(_WINDOW_TIMEOUT, "window loaded")
+    Diagnostics.breadcrumb("webview loop starting")
 
     try:
         webview.start(gui="edgechromium", private_mode=False)
@@ -238,7 +243,9 @@ def run_desktop(
     # Ensure the uvicorn server shuts down when the window closes.
     if _uvicorn_server is not None:  # pragma: no cover
         _uvicorn_server.should_exit = True
-    # os._exit bypasses atexit handlers and thread join waits that can hang.
+    # os._exit bypasses atexit handlers, so log the clean shutdown here or it
+    # never gets recorded at all.
+    Diagnostics.breadcrumb("shutdown")
     import os  # noqa: PLC0415
     os._exit(0)
 

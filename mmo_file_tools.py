@@ -19,6 +19,12 @@ def run(mode: str = "desktop") -> None:
     """Launch MMO FileTools in the chosen *mode* (``desktop`` or ``web``)."""
     mode = mode.strip().lower()
 
+    # First thing, so every later failure lands in the log file.
+    from mmo_file_tools.diagnostics import Diagnostics
+
+    Diagnostics.install()
+    Diagnostics.breadcrumb(f"cli: mode={mode}")
+
     if mode == "web":
         from mmo_file_tools.main import run_web
 
@@ -29,6 +35,7 @@ def run(mode: str = "desktop") -> None:
 
         splash = Splash()
         splash.show()
+        Diagnostics.breadcrumb("splash shown")
 
         try:
             from mmo_file_tools.desktop import run_desktop

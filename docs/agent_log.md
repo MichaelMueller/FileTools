@@ -1,5 +1,205 @@
 # Agent Log
 
+## 2026-08-06 – Startup diagnostics: a trace in every phase
+
+### Summary
+Follow-up to the silent installer failure below. That bug was not hard to find — it was hard
+to *notice*: the traceback existed all along, but the error dialog was built with `ctypes`,
+the very module that was broken, so nothing appeared. Closed the remaining phases in which a
+failure still vanished without a trace, and made the shortcuts go through a wrapper that can
+report failures occurring before Python exists.
+
+### Phases that were silent before
+- **Interpreter init / launcher's own imports.** The shortcuts ran `pythonw.exe` directly,
+  bypassing the `.bat` that captured stderr, so a `Fatal Python error` produced nothing.
+- **Exceptions in worker threads.** `desktop.py` runs uvicorn in a daemon thread; its death
+  left the window open with every API call failing, and logged nothing anywhere.
+- **uvicorn's own errors.** Configured with `log_level="warning"` to stderr, discarded under
+  `pythonw.exe`.
+- **Hangs.** Window never appears, process alive: nothing recorded at all.
+- **Clean exit.** `os._exit(0)` skips `atexit`, so a normal shutdown was never logged.
+
+There was also no `logging` configuration anywhere in the project — no running application
+log existed, only crash-time files.
+
+### Changes
+- **`mmo_file_tools/diagnostics.py`** (new, class `Diagnostics`) – rotating `app.log`
+  (1 MB × 3) under `<user_data_dir>/logs`, the same base the databases already use;
+  `sys.excepthook` and `threading.excepthook`; `faulthandler` into `crash.log`; uvicorn's
+  loggers adopted into the same file; `breadcrumb()` for phase markers; `start_watchdog()`
+  which dumps every thread's stack if a phase is not reached in time; `notify()` which falls
+  back to opening the log folder when the MessageBox cannot be shown. All failures inside it
+  are swallowed — diagnostics must never be the reason the app dies.
+- **Breadcrumbs** at the real transitions in `mmo_file_tools.py`, `desktop.py` and
+  `main.py`: `cli: mode=…` → `splash shown` → `port selected` → `server thread started` →
+  `server accepting connections` → `webview window created` → `webview loop starting` →
+  `window loaded` → `shutdown`. The watchdog is armed before `webview.start()` and cleared in
+  `_on_loaded`, which is what makes a silent hang diagnosable.
+- **`desktop.py`** – its private `_log_and_alert`, which wrote to a third log location
+  (`Path.cwd()`), now routes through `Diagnostics`.
+- **`installer_builder.py`** – shortcuts point at `mmo_file_tools.bat` with
+  `SW_SHOWMINNOACTIVE` instead of at `pythonw.exe`; the wrapper creates `logs\`, records
+  `launching`/`exit=N`, caps `startup.log` at 1 MB and **opens it when the exit code is
+  non-zero**, so a pre-Python failure still reaches the user. New **Open log folder** Start
+  Menu entry; `logs\` created by the installer so it works before first launch. The generated
+  `launcher.pyw` writes into `logs\` too.
+- **Tests** – new `test_diagnostics.py` covers both excepthooks, watchdog fires/cleared,
+  the notify fallback chain and that `install()` failures do not propagate. Two `test_desktop`
+  tests needed `Diagnostics.start_watchdog` patched: they patch `threading.Thread`, which is
+  global, and `threading.Timer` resolves `Thread` at call time — that broke the watchdog and
+  is documented inline.
+
+### Coverage
+372 tests pass. `diagnostics.py`, `installer_builder.py` and now `desktop.py` are at 100% —
+covering the new logging line in the "server never came up" branch meant covering the whole
+branch, which had been untested since before this work. Uncovered lines overall dropped from
+16 to 11 (`main.py` 249-250/669/673-674/706-707/733, `image_shrinker.py` 54-56); total
+coverage 98.85% → 99.28%. The 100% gate still fails on those remaining lines.
+
+One test defect found on the way: the hook tests called `notify()` for real, which pops a
+modal MessageBox and blocked the whole suite — visible as a stray `python` process owning a
+"MMO FileTools - Error" window. `notify` is now patched in those tests and exercised
+separately; the diagnostics module went from 11.8 s (blocked) to 0.6 s.
+
+### Found only by testing the installed product
+Two defects survived unit tests and were caught by running the real shortcut against a
+deliberately broken `libffi-8.dll`:
+
+- **NSIS rejected `SW_SHOWMINNOACTIVE`** — it only accepts
+  `SW_SHOWNORMAL|SW_SHOWMAXIMIZED|SW_SHOWMINIMIZED`. The test asserted the token was present
+  in the generated script, which invalid syntax passes trivially. `test_generated_nsis_script_
+  actually_compiles` now runs `makensis` against the generated `.nsi` (skipped when NSIS is
+  absent), so this class of bug fails in the suite instead of at build time.
+- **The log did not open.** `start ""` and `os.startfile` need a file association for `.log`,
+  which does not exist on a stock Windows — both silently do nothing. Everything *was*
+  recorded correctly, but the promise "a failure is never silent" was not actually kept.
+  Wrapper and launcher now invoke `notepad.exe` explicitly (always present, no association
+  needed), with the log folder as a last resort.
+
+A third, cosmetic issue: both the wrapper and the launcher opened an editor, so a failure
+produced two windows. The wrapper now sets `MMO_WRAPPED=1`; the launcher then writes its
+traceback to stderr — which the wrapper is already capturing into `startup.log` — and skips
+its own popup. One window, containing both the traceback and the exit code. Launched any
+other way (Debug entry, direct `pythonw`), the launcher still reports for itself.
+
+### Verified on the installed product
+- Normal start via the Start Menu shortcut: window opens, no editor, complete breadcrumb
+  chain `cli: mode=desktop → splash shown → port selected → server thread started → server
+  accepting connections → webview window created → webview loop starting → window loaded`.
+- `libffi-8.dll` renamed (reproducing the original failure): exactly one editor opens on
+  `startup.log`, containing the full `ImportError: DLL load failed while importing _ctypes`
+  traceback plus `exit=1`; `launcher.log` additionally holds exe, version, cwd and `sys.path`.
+
+The thread-exception hook, the watchdog and the notify fallback chain are covered by unit
+tests only — they cannot be triggered from outside the installed application.
+
+### The wrapper waits for a verdict, not for the app to exit
+The first version had the wrapper run the app in the foreground so it could read the exit
+code — which meant `cmd.exe` lived exactly as long as the app, leaving a console window in the
+taskbar for the whole session. My description of it as "briefly flashes" was simply wrong, and
+the earlier decision between wrapper variants was made on that wrong description.
+
+Rebuilt around a verdict instead: the app is launched detached with `start /B`, and the
+wrapper polls for one of two markers — `logs\.startup-ok`, written by `Diagnostics.mark_started()`
+once the window is loaded, or `logs\.startup-failed`, written by `launcher.pyw` when startup
+raised. On `ok` it closes silently, on `failed` it opens the log at once, and if neither
+appears within ~40 s it reports "no startup confirmation" (app died hard or hung).
+
+The load-bearing assumption here — that `start /B` still honours the `2>>` redirection, without
+which the early-phase capture would be lost — was measured against a deliberately broken
+`libffi-8.dll` before the code was written, not assumed.
+
+Measured on the installed product: window closes ~1 s after `window loaded` (the visible time
+is WebView2 startup, ~7.5 s cold); failure case opens the log after 2.6 s via the marker rather
+than sitting out the timeout. Fully removing the console would need VBScript (Windows Script
+Host dependency) or a compiled stub (build dependency); both were rejected.
+
+---
+
+## 2026-08-04 – Docker deployment, multi-provider OIDC, installer fix (v1.5.0)
+
+### Summary
+Added a containerised web-mode deployment with optional OIDC protection in front of it,
+supporting several identity providers side by side, each with its own user and domain
+whitelist. Version bumped 1.4.0 → 1.5.0. Also fixed the installer build, which has been
+broken since the v1.4.0 rename.
+
+### Changes
+- **`Dockerfile`** (new) – `python:3.12-slim`, web mode only; non-root user with build-arg
+  `APP_UID`/`APP_GID` to match the bind-mount owner; stdlib healthcheck. No compiler or
+  GTK/WebKit needed: all deps ship manylinux wheels and `pywebview` is imported lazily.
+- **`docker-compose.yml`** (new) – profile `open` publishes the app directly; profile `auth`
+  plus one `p-<slug>` per provider puts it behind one `oauth2-proxy` instance per provider,
+  each with its own port, cookie name and whitelists. In `auth` mode the app publishes no
+  port at all, so the proxies cannot be bypassed from outside the Docker network.
+- **`auth-emails` init container** – oauth2-proxy can only read its user list from a file, so
+  a short-lived busybox service discovers every `OIDC_<SLUG>_ALLOWED_*` variable in the env
+  file and writes one lowercased list per provider to a shared volume. Adding a provider
+  therefore only touches `.env` plus one compose block. Guards: rejects `*` in
+  `ALLOWED_DOMAINS`, and refuses to start when a provider has neither rule set.
+- **`.env.example`, `.dockerignore`** (new), **`.gitignore`** – `/data/` ignored.
+- **`README.md`** – Docker section: profiles, whitelist semantics (domain OR email list),
+  server deployment (TLS reverse proxy, uid, firewall), and which tools need `/data`.
+- **`mmo_file_tools/tools/installer_builder.py`** – **two bug fixes**, both of which made the
+  installer build impossible:
+  1. `_compile_nsis` looked for `{APP_NAME}-…-Setup.exe` while `_write_nsis_script` emits
+     `OutFile {APP_SLUG}-…-Setup.exe`, so every build failed with `FileNotFoundError` after
+     a successful `makensis` run. Broken since `APP_SLUG` was introduced in v1.4.0.
+  2. `_install_deps` required a project `.venv` unconditionally (`pip freeze` on
+     `.venv\Scripts\python.exe`), dying with `WinError 2` in any other setup — even though
+     `_create_venv` has always fallen back to the running interpreter. It now uses the same
+     fallback and resolves site-packages via `sysconfig`.
+
+### Installer: broken payload when built from conda, and why nobody saw the error
+Fixing (2) above made the build succeed from a conda env — and that produced an installer
+that installed cleanly and then did nothing on launch. Two separate defects:
+
+- **Broken payload.** `_make_venv_portable` copies the runtime in python.org layout (root
+  DLLs + `DLLs/` + `Lib/`). conda instead keeps `ffi-8.dll`, `sqlite3.dll`, `libssl-3-x64.dll`,
+  `liblzma.dll` in `Library\bin`, which was never copied, so `_ctypes` could not load its
+  dependency and `import ctypes` in `splash.py` failed immediately. New
+  `_check_base_is_redistributable()` (called first in `build()`) detects a `conda-meta`
+  directory in the base prefix and aborts with instructions, instead of shipping a payload
+  that cannot run. Building from conda is not made to work — conda's layout is not what the
+  portable runtime targets, and redistributing `defaults`-channel binaries raises a
+  licensing question that is out of scope here.
+- **Invisible failure.** The traceback *was* written to `mmo_file_tools-error.log`, but the
+  user saw nothing: `_show_error` built its MessageBox with `ctypes`, i.e. the very module
+  that was broken, so the notification silently failed too. The generated launcher now
+  (a) falls back to `os.startfile(log)` when the MessageBox cannot be shown, (b) catches
+  `BaseException` instead of `Exception`, (c) logs interpreter path, version, cwd and
+  `sys.path` alongside the traceback, and (d) enables `faulthandler` into
+  `mmo_file_tools-crash.log`. The `.bat` launcher redirects stderr to
+  `mmo_file_tools-startup.log` to capture failures that occur before any Python code runs
+  (the shortcuts bypass the `.bat`, so this only helps for `.bat`/debug launches). A new
+  `mmo_file_tools-debug.bat` plus a **(Debug)** Start Menu shortcut runs the console
+  interpreter with `faulthandler` and keeps the window open.
+
+Tests: the no-`.venv` path, both guard outcomes, the debug launcher and the ctypes-independent
+error path are covered, and the generated `launcher.pyw` is `compile()`-checked.
+- **Tests** – `test_compile_nsis_success` now derives the expected filename from the
+  generated `.nsi`'s own `OutFile` line instead of restating the constant; the old version
+  asserted `_compile_nsis` against the same wrong constant and so could never catch the
+  mismatch. `test_build_success` uses `APP_SLUG`. New `test_install_deps_without_dev_venv`
+  covers the no-`.venv` path — the existing tests fabricate a `.venv` in a tmp project root
+  and therefore never exercised it.
+- **Version** – `pyproject.toml`, `main.py`, `installer_builder.APP_VERSION`, compose image
+  tag, and `mmo_file_tools/__init__.py` (which had drifted behind at 1.3.1) all set to 1.5.0.
+
+### Verification
+348 tests pass; `installer_builder.py` at 100% coverage. Overall coverage 98.85% — the 100%
+gate still fails on the same 16 pre-existing lines as at v1.4.0 (`desktop.py` 102-106,
+`main.py` 249-250/669/673-674/706-707/733, `image_shrinker.py` 54-56), unaffected by this work.
+
+Docker verified against a live engine: image builds; `open` profile healthy and serving 200;
+`auth` profile with two providers → each port redirects to its own `client_id`, `/api/*`
+returns 401, distinct cookie names, app container has no published port; domain-only provider
+yields an empty list file and starts; both whitelist guards abort with a clear message.
+Login itself was exercised only with dummy credentials against `accounts.google.com`, so the
+403-for-unlisted-user path and the OR semantics still need one real IdP to confirm.
+
+---
+
 ## 2026-08-02 09:43 – Rename to MMO FileTools / `mmo_file_tools` (v1.4.0)
 
 ### Summary

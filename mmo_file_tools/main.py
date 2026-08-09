@@ -27,7 +27,7 @@ _SAFE_OPEN_EXTENSIONS = frozenset({
 # Optional pywebview window – set by desktop.py at runtime
 _webview_window = None  # type: ignore[assignment]
 
-app = FastAPI(title="MMO FileTools", version="1.4.0")
+app = FastAPI(title="MMO FileTools", version="1.5.0")
 
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -962,4 +962,8 @@ def set_webview_window(window: object) -> None:  # noqa: ANN001
 
 def run_web(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the uvicorn server (web mode)."""
+    from mmo_file_tools.diagnostics import Diagnostics  # noqa: PLC0415
+
+    Diagnostics.breadcrumb(f"web mode starting on {host}:{port}")
+    Diagnostics.mark_started()
     uvicorn.run(app, host=host, port=port)

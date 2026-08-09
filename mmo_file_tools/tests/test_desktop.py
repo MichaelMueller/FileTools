@@ -61,6 +61,30 @@ class TestPortHelpers:
 # ---------------------------------------------------------------------------
 
 
+def test_run_desktop_reports_server_startup_failure() -> None:
+    """A server that never accepts connections must be logged and surfaced."""
+    mock_ctypes = MagicMock()
+    mock_thread_cls = MagicMock(return_value=MagicMock())
+
+    with (
+        patch.dict("sys.modules", {"webview": MagicMock(), "ctypes": mock_ctypes}),
+        patch("mmo_file_tools.desktop.threading.Thread", mock_thread_cls),
+        patch("mmo_file_tools.desktop._find_port", return_value=9876),
+        patch(
+            "mmo_file_tools.desktop._wait_for_server",
+            side_effect=RuntimeError("Server on 127.0.0.1:9876 did not accept connections"),
+        ),
+        patch("mmo_file_tools.diagnostics.Diagnostics.logger") as mock_logger,
+    ):
+        from mmo_file_tools.desktop import run_desktop
+
+        with pytest.raises(RuntimeError, match="did not accept connections"):
+            run_desktop(host="127.0.0.1", port=9876)
+
+    mock_logger.return_value.error.assert_called_once()
+    mock_ctypes.windll.user32.MessageBoxW.assert_called_once()
+
+
 def test_run_desktop_starts_server_and_webview() -> None:
     """run_desktop starts a daemon thread, waits for server, creates a window, and calls start."""
     mock_window = MagicMock()
@@ -84,6 +108,10 @@ def test_run_desktop_starts_server_and_webview() -> None:
         patch.dict("sys.modules", {"webview": mock_webview}),
         patch("mmo_file_tools.desktop.webview", mock_webview),
         patch("mmo_file_tools.desktop.threading.Thread", mock_thread_cls),
+        # Patching threading.Thread is global, and threading.Timer resolves
+        # Thread at call time – so the watchdog cannot be built here. It has its
+        # own tests; arming a real 30s timer per test run would be pointless.
+        patch("mmo_file_tools.diagnostics.Diagnostics.start_watchdog"),
         patch("mmo_file_tools.desktop._wait_for_server") as mock_wait,
         patch("mmo_file_tools.desktop._find_port", return_value=9876),
         patch("os._exit") as mock_exit,
@@ -146,6 +174,8 @@ def test_run_desktop_swallows_base_exception_on_close() -> None:
         patch.dict("sys.modules", {"webview": mock_webview}),
         patch("mmo_file_tools.desktop.webview", mock_webview),
         patch("mmo_file_tools.desktop.threading.Thread", mock_thread_cls),
+        # See the note in test_run_desktop_starts_server_and_webview.
+        patch("mmo_file_tools.diagnostics.Diagnostics.start_watchdog"),
         patch("mmo_file_tools.desktop._wait_for_server"),
         patch("mmo_file_tools.desktop._find_port", return_value=9876),
         patch("os._exit") as mock_exit,

@@ -128,6 +128,69 @@ class TestSteps:
         assert "launcher.pyw" in content
         # Must NOT reference Scripts (old broken path)
         assert "Scripts" not in content
+        # pythonw has no console, so stderr must land in a file – otherwise a
+        # failed interpreter init is completely invisible.
+        assert '2>>"%STARTUP%"' in content
+        assert "logs\\startup.log" in content
+        # The log directory must be created before anything writes to it.
+        assert 'if not exist "logs" mkdir "logs"' in content
+        # Detached, so the console window is not tied to the app's lifetime;
+        # /B still preserves the stderr redirection.
+        assert 'start "" /B ".venv\\pythonw.exe" launcher.pyw %* 2>>"%STARTUP%"' in content
+        # It waits for a verdict rather than for the app to end...
+        assert f'if exist "%OKMARK%" goto mmo_done' in content
+        assert f'if exist "%FAILMARK%" goto mmo_failed' in content
+        # ...and surfaces the log via notepad.exe, because ".log" often has no
+        # file association and plain "start" then shows nothing.
+        assert 'start "" notepad.exe "%STARTUP%"' in content
+        # Stale markers from a previous run must not decide this one.
+        assert 'if exist "%OKMARK%" del "%OKMARK%"' in content
+        assert 'if exist "%FAILMARK%" del "%FAILMARK%"' in content
+        # Marks the launch so the launcher does not open a second editor.
+        assert 'set "MMO_WRAPPED=1"' in content
+
+    def test_write_launcher_debug_bat(self, builder: InstallerBuilder) -> None:
+        """A console launcher must exist for diagnosing startup failures."""
+        builder._clean()
+        builder._create_staging()
+        builder._write_launcher()
+        debug = builder._staging / "app" / f"{InstallerBuilder.APP_SLUG}-debug.bat"
+        assert debug.exists()
+        content = debug.read_text(encoding="utf-8")
+        # Console python (not pythonw) and the window must stay open.
+        assert ".venv\\python.exe" in content
+        assert "pythonw" not in content
+        assert "faulthandler" in content
+        assert "pause" in content
+
+    def test_launcher_error_handler_survives_broken_ctypes(
+        self, builder: InstallerBuilder,
+    ) -> None:
+        """The error path must not depend on ctypes, which may be the failure."""
+        builder._clean()
+        builder._create_staging()
+        builder._write_launcher()
+        src = (builder._staging / "app" / "launcher.pyw").read_text(encoding="utf-8")
+        # Falls back to notepad when the MessageBox cannot be shown; os.startfile
+        # on a ".log" needs an association that often does not exist.
+        assert 'subprocess.Popen(["notepad.exe", _LOG])' in src
+        assert "os.startfile(_LOG_DIR)" in src
+        # Under the wrapper the traceback goes to stderr (captured into
+        # startup.log) and the wrapper reports it – no duplicate editor.
+        assert "sys.stderr.write(tb)" in src
+        assert 'os.environ.get("MMO_WRAPPED") != "1"' in src
+        # Tells the waiting wrapper to stop polling and show the log now,
+        # instead of sitting out the full timeout.
+        assert InstallerBuilder._FAIL_MARKER in src
+        # Catches BaseException, not just Exception, so nothing dies silently.
+        assert "except BaseException:" in src
+        # Records the runtime context needed to spot a broken interpreter.
+        assert "sys.executable" in src
+        assert "sys.path" in src
+        # Writes into the single logs/ directory, not the install root.
+        assert '_LOG_DIR = os.path.join(_APP_DIR, "logs")' in src
+        # Must be valid Python.
+        compile(src, "launcher.pyw", "exec")
 
     def test_write_nsis_script(self, builder: InstallerBuilder) -> None:
         builder._clean()
@@ -140,9 +203,42 @@ class TestSteps:
         assert "MMO FileTools" in content
         assert "MUI2.nsh" in content
         assert "Uninstall" in content
-        # Shortcuts must point to pythonw.exe directly (no console)
-        assert ".venv\\pythonw.exe" in content
-        assert "launcher.pyw" in content
+        # Shortcuts must go through the wrapper, not pythonw.exe: only the
+        # wrapper can capture a failure that happens before Python runs.
+        assert f'"$INSTDIR\\{InstallerBuilder.APP_EXE_NAME}" ""' in content
+        # NSIS only accepts SW_SHOWNORMAL|SW_SHOWMAXIMIZED|SW_SHOWMINIMIZED.
+        assert "SW_SHOWMINIMIZED" in content
+        assert ".venv\\pythonw.exe" not in content
+        # Log folder must exist for its shortcut to work before the first launch.
+        assert 'CreateDirectory "$INSTDIR\\logs"' in content
+        assert "Open log folder.lnk" in content
+
+    def test_generated_nsis_script_actually_compiles(
+        self, builder: InstallerBuilder,
+    ) -> None:
+        """Asserting on substrings cannot catch invalid NSIS syntax.
+
+        A wrong token (e.g. a show mode NSIS does not know) passes every string
+        check and only fails at build time, so let makensis judge the script.
+        """
+        try:
+            nsis = InstallerBuilder._find_nsis()
+        except FileNotFoundError:  # pragma: no cover - NSIS not installed here
+            pytest.skip("NSIS is not installed")
+
+        builder._clean()
+        builder._create_staging()
+        # NSIS parses the icon, so it has to be a real one.
+        real_icon = Path(__file__).parent.parent / "static" / "icon.ico"
+        shutil.copy2(real_icon, builder._staging / "app" / "icon.ico")
+        (builder._staging / "app" / "placeholder.txt").write_text("x")
+        nsi = builder._write_nsis_script()
+
+        result = subprocess.run(
+            [str(nsis), "/V2", str(nsi)],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0, f"makensis rejected the script:\n{result.stdout}{result.stderr}"
 
     def test_write_nsis_script_no_icon(self, builder: InstallerBuilder) -> None:
         builder._clean()
@@ -183,8 +279,15 @@ class TestSteps:
         builder._clean()
         builder._create_staging()
         nsi = builder._write_nsis_script()
+        # Derive the name from the generated script's own OutFile instead of
+        # restating it, so this fails if _compile_nsis and _write_nsis_script
+        # ever disagree on the filename again.
+        out_line = next(
+            line for line in nsi.read_text(encoding="utf-8").splitlines()
+            if line.strip().startswith("OutFile ")
+        )
+        expected = Path(out_line.split('"')[1])
         # Pre-create the expected output file (as if makensis produced it)
-        expected = builder._output / f"{InstallerBuilder.APP_NAME}-{InstallerBuilder.APP_VERSION}-Setup.exe"
         expected.write_bytes(b"FAKE")
         with patch("subprocess.check_call"):
             result = builder._compile_nsis(nsi)
@@ -299,6 +402,51 @@ class TestSteps:
         assert (staging_sp / "pythonnet" / "__init__.py").exists()
         assert (staging_sp / "cffi" / "__init__.py").exists()
         assert (staging_sp / "_cffi_backend.pyd").exists()
+
+    def test_check_base_rejects_conda(self, builder: InstallerBuilder) -> None:
+        """Building from a conda env must fail loudly, not ship a broken payload."""
+        conda_base = builder.project_root / "fake-conda"
+        (conda_base / "conda-meta").mkdir(parents=True)
+        with patch.object(builder, "_base_python_dir", return_value=conda_base):
+            with pytest.raises(RuntimeError, match="conda"):
+                builder._check_base_is_redistributable()
+
+    def test_check_base_accepts_normal_python(self, builder: InstallerBuilder) -> None:
+        normal_base = builder.project_root / "fake-python"
+        (normal_base / "DLLs").mkdir(parents=True)
+        with patch.object(builder, "_base_python_dir", return_value=normal_base):
+            builder._check_base_is_redistributable()  # must not raise
+
+    def test_install_deps_without_dev_venv(self, builder: InstallerBuilder) -> None:
+        """_install_deps falls back to the build interpreter when no .venv exists."""
+        builder._clean()
+        builder._create_staging()
+
+        # No project .venv – e.g. the project is developed in a conda env.
+        assert not (builder.project_root / ".venv" / "Scripts" / "python.exe").is_file()
+
+        fallback_sp = builder.project_root / "conda-site-packages"
+        fallback_sp.mkdir(parents=True, exist_ok=True)
+        (fallback_sp / "clr.py").write_text("# clr shim")
+
+        staging_venv = builder._staging / "app" / ".venv"
+        staging_sp = staging_venv / "Lib" / "site-packages"
+        staging_sp.mkdir(parents=True, exist_ok=True)
+        pip_exe = staging_venv / "Scripts" / "pip.exe"
+        pip_exe.parent.mkdir(parents=True, exist_ok=True)
+        pip_exe.write_bytes(b"EXE")
+
+        # First check_output resolves site-packages, second is the pip freeze.
+        with (
+            patch(
+                "subprocess.check_output",
+                side_effect=[f"{fallback_sp}\n", "click==8.1.7\n"],
+            ),
+            patch("subprocess.check_call"),
+        ):
+            builder._install_deps()
+
+        assert (staging_sp / "clr.py").exists()
 
     def test_install_deps_skips_comments_and_known_pkgs(
         self, builder: InstallerBuilder,
@@ -508,11 +656,12 @@ class TestBuild:
 
         def _fake_compile(nsi_path: Path) -> Path:
             # Simulate makensis creating the installer
-            out = builder._output / f"{InstallerBuilder.APP_NAME}-{InstallerBuilder.APP_VERSION}-Setup.exe"
+            out = builder._output / f"{InstallerBuilder.APP_SLUG}-{InstallerBuilder.APP_VERSION}-Setup.exe"
             out.write_bytes(b"FAKE_INSTALLER")
             return out
 
         with (
+            patch.object(builder, "_check_base_is_redistributable"),
             patch.object(builder, "_create_venv"),
             patch.object(builder, "_install_deps"),
             patch.object(builder, "_make_venv_portable"),
